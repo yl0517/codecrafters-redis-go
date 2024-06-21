@@ -28,11 +28,13 @@ func main() {
 	defer conn.Close()
 
 	reader := bufio.NewReader(conn)
+
+out:
 	for {
 		_, err := reader.ReadString('\n')
 		sendPong(conn)
 		if err != nil {
-			break
+			break out
 		}
 	}
 
