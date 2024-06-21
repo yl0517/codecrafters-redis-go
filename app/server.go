@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	// Uncomment this block to pass the first stage
+	"bufio"
 	"net"
 	"os"
 )
@@ -18,12 +19,27 @@ func main() {
 		fmt.Println("Failed to bind to port 6379")
 		os.Exit(1)
 	}
-	c, err := l.Accept()
+
+	conn, err := l.Accept()
 	if err != nil {
 		fmt.Println("Error accepting connection: ", err.Error())
 		os.Exit(1)
 	}
+	defer conn.Close()
 
+	reader := bufio.NewReader(conn)
+	for {
+		_, err := reader.ReadString('\n')
+		sendPong(conn)
+		if err != nil {
+			break
+		}
+	}
+
+	os.Exit(0)
+}
+
+func sendPong(c net.Conn) {
 	response := []byte("+PONG\r\n")
 	c.Write(response)
 }
