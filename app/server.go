@@ -17,35 +17,44 @@ func main() {
 		os.Exit(1)
 	}
 
-	conn, err := l.Accept()
-	if err != nil {
-		fmt.Println("Error accepting connection: ", err.Error())
-		os.Exit(1)
-	}
-	defer conn.Close()
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			fmt.Println("Error accepting connection: ", err.Error())
+			os.Exit(1)
+		}
 
-	reader := bufio.NewReader(conn)
+		go handleConnection(conn)
+	}
+
+}
+
+func handleConnection(c net.Conn) {
+	defer c.Close()
+
+	reader := bufio.NewReader(c)
 
 	for {
 		s, err := reader.ReadString('\n')
-		if s[len(s)-1] == '\n' {
-			s = s[:len(s)-1]
-		}
 
-		if s[len(s)-1] == '\r' {
-			s = s[:len(s)-1]
-		}
+		if len(s) > 0 {
+			if s[len(s)-1] == '\n' {
+				s = s[:len(s)-1]
+			}
 
-		if s == "PING" {
-			sendPong(conn)
+			if s[len(s)-1] == '\r' {
+				s = s[:len(s)-1]
+			}
+
+			if s == "PING" {
+				sendPong(c)
+			}
 		}
 
 		if err != nil {
 			break
 		}
 	}
-
-	os.Exit(0)
 }
 
 func sendPong(c net.Conn) {
