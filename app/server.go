@@ -1,9 +1,8 @@
 package main
 
 import (
-	"fmt"
-	// Uncomment this block to pass the first stage
 	"bufio"
+	"fmt"
 	"net"
 	"os"
 )
@@ -28,9 +27,19 @@ func main() {
 	reader := bufio.NewReader(conn)
 
 	for {
-		_, err := reader.ReadString('\n')
-		sendPong(conn)
-		fmt.Println("testing")
+		s, err := reader.ReadString('\n')
+		if s[len(s)-1] == '\n' {
+			s = s[:len(s)-1]
+		}
+
+		if s[len(s)-1] == '\r' {
+			s = s[:len(s)-1]
+		}
+
+		if s == "PING" {
+			sendPong(conn)
+		}
+
 		if err != nil {
 			break
 		}
@@ -40,6 +49,6 @@ func main() {
 }
 
 func sendPong(c net.Conn) {
-	response := []byte("+PONG\r\n")
-	c.Write(response)
+	fmt.Println("pong")
+	c.Write([]byte("+PONG\r\n"))
 }
