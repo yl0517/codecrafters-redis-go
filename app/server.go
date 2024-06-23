@@ -78,29 +78,10 @@ func handleConnection(c net.Conn) {
 			request = append(request, s)
 		}
 
-		handleRequest(c, request)
+		protocol.HandleRequest(conn, request)
 
-		if err != nil {
-			break
-		}
+		// if err != nil {
+		// 	break
+		// }
 	}
-}
-
-func handleRequest(c net.Conn, request []string) {
-	if request[0] == "PING" {
-		handlePing(c)
-	}
-
-	if request[0] == "ECHO" {
-		handleEcho(c, request[1])
-	}
-}
-
-func handleEcho(c net.Conn, message string) {
-	c.Write([]byte(fmt.Sprintf("$%d\r\n%s\r\n", len(message), message)))
-}
-
-func handlePing(c net.Conn) {
-	fmt.Println("pong")
-	c.Write([]byte("+PONG\r\n"))
 }

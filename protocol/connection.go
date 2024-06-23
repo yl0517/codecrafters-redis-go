@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"bufio"
+	"fmt"
 	"net"
 )
 
@@ -39,4 +40,18 @@ func (c *Connection) GetLine() (string, error) {
 	}
 
 	return s, err
+}
+
+// Write writes the given string to the connection
+func (c *Connection) Write(s string) error {
+	var written int
+
+	for written < len(s) {
+		n, err := c.conn.Write([]byte(s[written:]))
+		if err != nil {
+			return fmt.Errorf("Write failed: %v", err)
+		}
+		written += n
+	}
+	return nil
 }
