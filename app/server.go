@@ -1,10 +1,11 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"net"
 	"os"
+
+	"github.com/codecrafters-io/redis-starter-go/protocol"
 )
 
 func main() {
@@ -30,26 +31,54 @@ func main() {
 }
 
 func handleConnection(c net.Conn) {
-	defer c.Close()
+	conn := protocol.NewConnection(c)
 
-	reader := bufio.NewReader(c)
+	defer conn.Close()
 
 	for {
-		s, err := reader.ReadString('\n')
-
-		if len(s) > 0 {
-			if s[len(s)-1] == '\n' {
-				s = s[:len(s)-1]
-			}
-
-			if s[len(s)-1] == '\r' {
-				s = s[:len(s)-1]
-			}
-
-			if s == "PING" {
-				sendPong(c)
-			}
+		numElem, err := conn.GetLine()
+		if err != nil {
+			fmt.Println("conn.GetLine() failed: ", err.Error())
+			return
 		}
+
+		len, err := protocol.GetArrayLength(numElem)
+		if err != nil {
+			fmt.Println("protocol.GetLength() failed: ", err.Error())
+			return
+		}
+
+		var request []string
+
+		for i := 0; i < len; i++ {
+			line, err := conn.GetLine()
+			if err != nil {
+				fmt.Println("conn.GetLine() failed: ", err.Error())
+				return
+			}
+
+			len, err := protocol.GetBulkStringLength(line)
+			if err != nil {
+				fmt.Println("protocol.GetBulkStringLength() failed: ", err.Error())
+				return
+			}
+
+			s, err := conn.GetLine()
+			if err != nil {
+				fmt.Println("conn.GetLine() failed: ", err.Error())
+				return
+			}
+
+			err = protocol.VerifyBulkStringLength(s, len)
+			if err != nil {
+				fmt.Println("protocol.VerifyBulkStringLength() failed: ", err.Error())
+				return
+			}
+
+			request = append(request, s)
+		}
+
+		handleRequest(c, request)
 
 		if err != nil {
 			break
@@ -57,7 +86,21 @@ func handleConnection(c net.Conn) {
 	}
 }
 
-func sendPong(c net.Conn) {
+func handleRequest(c net.Conn, request []string) {
+	if request[0] == "PING" {
+		handlePing(c)
+	}
+
+	if request[0] == "ECHO" {
+		handleEcho(c, request[1])
+	}
+}
+
+func handleEcho(c net.Conn, message string) {
+	c.Write([]byte(fmt.Sprintf("$%d\r\n%s\r\n", len(message), message)))
+}
+
+func handlePing(c net.Conn) {
 	fmt.Println("pong")
 	c.Write([]byte("+PONG\r\n"))
 }
