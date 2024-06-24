@@ -1,11 +1,26 @@
 package protocol
 
 import (
-	"errors"
 	"fmt"
+	"strconv"
+	"time"
 )
 
-var storage = map[string]string{}
+var cache = map[string]*Entry{}
+
+// Entry represents the cache entry.ß
+type Entry struct {
+	msg      string
+	expireAt int64
+}
+
+// NewEntry is the Entry constructor.
+func NewEntry(s string, t int64) *Entry {
+	return &Entry{
+		msg:      s,
+		expireAt: t,
+	}
+}
 
 // HandleRequest responds to the request recieved.
 func HandleRequest(c *Connection, request []string) error {
@@ -59,14 +74,19 @@ func handlePing(c *Connection) error {
 }
 
 func handleSet(c *Connection, request []string) error {
-	if len(request) > 2 {
-		return errors.New("Request is not a key value pair")
-	}
-
 	key := request[0]
 	value := request[1]
 
-	storage[key] = value
+	var expireAt int64 // initially zero
+	if len(request) == 4 {
+		expireAfter, err := strconv.ParseInt(request[3], 10, 64)
+		if err != nil {
+			return fmt.Errorf("Atoi failed: %v", err)
+		}
+		expireAt = time.Now().UnixMilli() + expireAfter
+	}
+
+	cache[key] = NewEntry(value, expireAt)
 
 	err := c.Write("+OK\r\n")
 	if err != nil {
@@ -76,8 +96,28 @@ func handleSet(c *Connection, request []string) error {
 	return nil
 }
 
-func handleGet(c *Connection, request string) error {
-	err := c.Write(fmt.Sprintf("$%d\r\n%s\r\n", len(storage[request]), storage[request]))
+func handleGet(c *Connection, key string) error {
+	now := time.Now().UnixMilli()
+
+	entry, ok := cache[key]
+	if !ok {
+		err := c.Write("$-1\r\n")
+		if err != nil {
+			return fmt.Errorf("Write failed: %v", err)
+		}
+		return nil
+	}
+
+	if entry.expireAt != 0 && now > entry.expireAt {
+		err := c.Write("$-1\r\n")
+		if err != nil {
+			return fmt.Errorf("Write failed: %v", err)
+		}
+		delete(cache, key)
+		return nil
+	}
+
+	err := c.Write(fmt.Sprintf("$%d\r\n%s\r\n", len(entry.msg), entry.msg))
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
 	}
