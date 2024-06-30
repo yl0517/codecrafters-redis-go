@@ -6,15 +6,25 @@ import (
 	"os"
 
 	"github.com/codecrafters-io/redis-starter-go/protocol"
+	"github.com/jessevdk/go-flags"
 )
 
 func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Println("Logs from your program will appear here!")
 
-	l, err := net.Listen("tcp", "0.0.0.0:6379")
+	var opts struct {
+		PortNum string `long:"port" description:"Port Number" default:"6379"`
+	}
+
+	_, err := flags.Parse(&opts)
 	if err != nil {
-		fmt.Println("Failed to bind to port 6379")
+		fmt.Println("flags.Parse failed:", err.Error())
+	}
+
+	l, err := net.Listen("tcp", "0.0.0.0:"+opts.PortNum)
+	if err != nil {
+		fmt.Println("Failed to bind to port")
 		os.Exit(1)
 	}
 
@@ -79,9 +89,5 @@ func handleConnection(c net.Conn) {
 		}
 
 		protocol.HandleRequest(conn, request)
-
-		// if err != nil {
-		// 	break
-		// }
 	}
 }
