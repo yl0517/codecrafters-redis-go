@@ -135,14 +135,15 @@ func handleGet(c *Connection, key string) error {
 func handleInfo(c *Connection, arg string, repInfo string) error {
 	if arg == "replication" {
 		if repInfo != "" {
-			err := c.Write("$11\r\nrole:slave\r\n")
+			err := c.Write("$10\r\nrole:slave\r\n")
 			if err != nil {
 				return fmt.Errorf("Write failed: %v", err)
 			}
-		}
-		err := c.Write("$11\r\nrole:master\r\n")
-		if err != nil {
-			return fmt.Errorf("Write failed: %v", err)
+		} else {
+			err := c.Write("$11\r\nrole:master\r\n")
+			if err != nil {
+				return fmt.Errorf("Write failed: %v", err)
+			}
 		}
 	}
 	return nil
