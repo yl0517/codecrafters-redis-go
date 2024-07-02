@@ -52,6 +52,13 @@ func HandleRequest(c *Connection, request []string) error {
 		}
 	}
 
+	if request[0] == "INFO" {
+		err := handleInfo(c, request[1])
+		if err != nil {
+			return fmt.Errorf("GET failed: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -122,5 +129,15 @@ func handleGet(c *Connection, key string) error {
 		return fmt.Errorf("Write failed: %v", err)
 	}
 
+	return nil
+}
+
+func handleInfo(c *Connection, arg string) error {
+	if arg == "replication" {
+		err := c.Write("$11\r\nrole:master\r\n")
+		if err != nil {
+			return fmt.Errorf("Write failed: %v", err)
+		}
+	}
 	return nil
 }
