@@ -9,13 +9,14 @@ import (
 	"github.com/jessevdk/go-flags"
 )
 
+var opts struct {
+	PortNum     string `long:"port" description:"Port Number" default:"6379"`
+	ReplicaInfo string `long:"replicaof" description:"Replica of <MASTER_HOST> <MASTER_PORT>" default:""`
+}
+
 func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Println("Logs from your program will appear here!")
-
-	var opts struct {
-		PortNum string `long:"port" description:"Port Number" default:"6379"`
-	}
 
 	_, err := flags.Parse(&opts)
 	if err != nil {
@@ -88,6 +89,6 @@ func handleConnection(c net.Conn) {
 			request = append(request, s)
 		}
 
-		protocol.HandleRequest(conn, request)
+		protocol.HandleRequest(conn, request, opts.ReplicaInfo)
 	}
 }
