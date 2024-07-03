@@ -66,6 +66,10 @@ func handleConnection(c net.Conn) {
 
 	defer conn.Close()
 
+	r := NewReplica(conn)
+
+	protocol.Handshake(r)
+
 	for {
 		numElem, err := conn.GetLine()
 		if err != nil {
@@ -109,6 +113,6 @@ func handleConnection(c net.Conn) {
 			request = append(request, s)
 		}
 
-		protocol.HandleRequest(NewReplica(conn), request)
+		protocol.HandleRequest(r, request)
 	}
 }
