@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"net"
 	"os"
 
@@ -12,6 +13,25 @@ import (
 var opts struct {
 	PortNum     string `long:"port" description:"Port Number" default:"6379"`
 	ReplicaInfo string `long:"replicaof" description:"Replica of <MASTER_HOST> <MASTER_PORT>" default:""`
+}
+
+func NewReplica(conn *protocol.Connection) *protocol.Replica {
+	return &protocol.Replica{
+		C:                conn,
+		RepInfo:          opts.ReplicaInfo,
+		MasterReplid:     GenerateReplid(),
+		MasterReplOffset: "0",
+	}
+}
+
+func GenerateReplid() string {
+	const letterBytes = "abcdefghijklmnopqrstuvwxyz1234567890"
+
+	b := make([]byte, 40)
+	for i := range b {
+		b[i] = letterBytes[rand.Intn(len(letterBytes))]
+	}
+	return string(b)
 }
 
 func main() {
@@ -89,6 +109,6 @@ func handleConnection(c net.Conn) {
 			request = append(request, s)
 		}
 
-		protocol.HandleRequest(conn, request, opts.ReplicaInfo)
+		protocol.HandleRequest(NewReplica(conn), request)
 	}
 }

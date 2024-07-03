@@ -8,7 +8,7 @@ import (
 
 var cache = map[string]*Entry{}
 
-// Entry represents the cache entry.ß
+// Entry represents the cache entry.
 type Entry struct {
 	msg      string
 	expireAt int64
@@ -22,38 +22,45 @@ func NewEntry(s string, t int64) *Entry {
 	}
 }
 
+type Replica struct {
+	C                *Connection
+	RepInfo          string
+	MasterReplid     string
+	MasterReplOffset string
+}
+
 // HandleRequest responds to the request recieved.
-func HandleRequest(c *Connection, request []string, repInfo string) error {
+func HandleRequest(rep *Replica, request []string) error {
 	if request[0] == "PING" {
-		err := handlePing(c)
+		err := handlePing(rep.C)
 		if err != nil {
 			return fmt.Errorf("PING failed: %v", err)
 		}
 	}
 
 	if request[0] == "ECHO" {
-		err := handleEcho(c, request[1])
+		err := handleEcho(rep.C, request[1])
 		if err != nil {
 			return fmt.Errorf("ECHO failed: %v", err)
 		}
 	}
 
 	if request[0] == "SET" {
-		err := handleSet(c, request[1:])
+		err := handleSet(rep.C, request[1:])
 		if err != nil {
 			return fmt.Errorf("SET failed: %v", err)
 		}
 	}
 
 	if request[0] == "GET" {
-		err := handleGet(c, request[1])
+		err := handleGet(rep.C, request[1])
 		if err != nil {
 			return fmt.Errorf("GET failed: %v", err)
 		}
 	}
 
 	if request[0] == "INFO" {
-		err := handleInfo(c, request[1], repInfo)
+		err := handleInfo(request[1], rep)
 		if err != nil {
 			return fmt.Errorf("GET failed: %v", err)
 		}
@@ -132,19 +139,25 @@ func handleGet(c *Connection, key string) error {
 	return nil
 }
 
-func handleInfo(c *Connection, arg string, repInfo string) error {
+func handleInfo(arg string, rep *Replica) error {
+	var s string
+
 	if arg == "replication" {
-		if repInfo != "" {
-			err := c.Write("$10\r\nrole:slave\r\n")
-			if err != nil {
-				return fmt.Errorf("Write failed: %v", err)
-			}
+		s += "# Replication\r\n"
+		if rep.RepInfo != "" {
+			s += "role:slave\r\n"
 		} else {
-			err := c.Write("$11\r\nrole:master\r\n")
-			if err != nil {
-				return fmt.Errorf("Write failed: %v", err)
-			}
+			s += "role:master\r\n"
 		}
+
+		s += fmt.Sprintf("master_replid:%s\r\n", rep.MasterReplid)
+
+		s += fmt.Sprintf("master_repl_offset:%s\r\n", rep.MasterReplOffset)
+	}
+
+	err := rep.C.Write(fmt.Sprintf("$%d\r\n%s\r\n", len(s), s))
+	if err != nil {
+		return fmt.Errorf("Write failed: %v", err)
 	}
 	return nil
 }
