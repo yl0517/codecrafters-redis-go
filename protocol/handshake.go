@@ -15,9 +15,10 @@ func Handshake(p string) {
 		fmt.Println("net.Dial() failed: ", err.Error())
 	}
 
-	sendPing(conn)
+	c := NewConnection(conn)
+	sendPing(c)
 }
 
-func sendPing(c net.Conn) {
-	c.Write([]byte("*1\r\n$4\r\nPING\r\n"))
+func sendPing(c *Connection) {
+	c.Write("*1\r\n$4\r\nPING\r\n")
 }
