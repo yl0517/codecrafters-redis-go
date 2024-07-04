@@ -11,14 +11,14 @@ import (
 )
 
 var opts struct {
-	PortNum     string `long:"port" description:"Port Number" default:"6379"`
-	ReplicaInfo string `long:"replicaof" description:"Replica of <MASTER_HOST> <MASTER_PORT>" default:""`
+	PortNum   string `long:"port" description:"Port Number" default:"6379"`
+	ReplicaOf string `long:"replicaof" description:"Replica of <MASTER_HOST> <MASTER_PORT>" default:""`
 }
 
 func NewReplica(conn *protocol.Connection) *protocol.Replica {
 	return &protocol.Replica{
 		C:                conn,
-		RepInfo:          opts.ReplicaInfo,
+		RepInfo:          opts.ReplicaOf,
 		MasterReplid:     GenerateReplid(),
 		MasterReplOffset: "0",
 	}
@@ -49,6 +49,10 @@ func main() {
 		os.Exit(1)
 	}
 
+	if opts.ReplicaOf != "" {
+		protocol.Handshake(opts.ReplicaOf)
+	}
+
 	for {
 		conn, err := l.Accept()
 		if err != nil {
@@ -58,17 +62,12 @@ func main() {
 
 		go handleConnection(conn)
 	}
-
 }
 
 func handleConnection(c net.Conn) {
 	conn := protocol.NewConnection(c)
 
 	defer conn.Close()
-
-	r := NewReplica(conn)
-
-	protocol.Handshake(r)
 
 	for {
 		numElem, err := conn.GetLine()
@@ -113,6 +112,6 @@ func handleConnection(c net.Conn) {
 			request = append(request, s)
 		}
 
-		protocol.HandleRequest(r, request)
+		protocol.HandleRequest(NewReplica(conn), request)
 	}
 }
