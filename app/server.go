@@ -50,7 +50,7 @@ func main() {
 	}
 
 	if opts.ReplicaOf != "" {
-		protocol.Handshake(opts.ReplicaOf)
+		protocol.Handshake(opts.ReplicaOf, opts.PortNum)
 	}
 
 	for {
