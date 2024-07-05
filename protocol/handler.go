@@ -66,6 +66,13 @@ func HandleRequest(rep *Replica, request []string) error {
 		}
 	}
 
+	if request[0] == "REPLCONF" {
+		err := handleReplconf(rep.C)
+		if err != nil {
+			return fmt.Errorf("REPLCONF failed: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -159,5 +166,14 @@ func handleInfo(arg string, rep *Replica) error {
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
 	}
+	return nil
+}
+
+func handleReplconf(c *Connection) error {
+	err := c.Write("+OK\r\n")
+	if err != nil {
+		return fmt.Errorf("Write failed: %v", err)
+	}
+
 	return nil
 }
