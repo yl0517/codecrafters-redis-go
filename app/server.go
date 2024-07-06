@@ -10,13 +10,17 @@ import (
 	"github.com/jessevdk/go-flags"
 )
 
+// Repls stores address and connection of replications
+var Repls = map[string]*protocol.Connection{}
+
 var opts struct {
 	PortNum   string `long:"port" description:"Port Number" default:"6379"`
 	ReplicaOf string `long:"replicaof" description:"Replica of <MASTER_HOST> <MASTER_PORT>" default:""`
 }
 
-func NewReplica(conn *protocol.Connection) *protocol.Replica {
-	return &protocol.Replica{
+// NewReplica creates a new replica
+func NewReplica(conn *protocol.Connection) *protocol.Server {
+	return &protocol.Server{
 		Conn:             conn,
 		RepInfo:          opts.ReplicaOf,
 		MasterReplid:     GenerateReplid(),
@@ -24,6 +28,7 @@ func NewReplica(conn *protocol.Connection) *protocol.Replica {
 	}
 }
 
+// GenerateReplid create a pseudo random alphanumeric string of 40 characters
 func GenerateReplid() string {
 	const letterBytes = "abcdefghijklmnopqrstuvwxyz1234567890"
 
@@ -43,14 +48,14 @@ func main() {
 		fmt.Println("flags.Parse failed:", err.Error())
 	}
 
+	if opts.ReplicaOf != "" {
+		protocol.ReplConnection(opts.ReplicaOf, opts.PortNum)
+	}
+
 	l, err := net.Listen("tcp", "0.0.0.0:"+opts.PortNum)
 	if err != nil {
 		fmt.Println("Failed to bind to port")
 		os.Exit(1)
-	}
-
-	if opts.ReplicaOf != "" {
-		protocol.Handshake(opts.ReplicaOf, opts.PortNum)
 	}
 
 	for {
@@ -112,6 +117,6 @@ func handleConnection(c net.Conn) {
 			request = append(request, s)
 		}
 
-		protocol.HandleRequest(NewReplica(conn), request)
+		protocol.HandleRequest(NewReplica(conn), request, Repls)
 	}
 }

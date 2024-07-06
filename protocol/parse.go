@@ -41,3 +41,13 @@ func VerifyBulkStringLength(s string, length int) error {
 
 	return nil
 }
+
+// ToRespArray recieves an array of strings and returns a RESP Array
+func ToRespArray(arr []string) string {
+	respArr := fmt.Sprintf("*%d\r\n", len(arr))
+	for _, s := range arr {
+		respArr += fmt.Sprintf("$%d\r\n%s\r\n", len(s), s)
+	}
+
+	return respArr
+}
