@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strconv"
 	"time"
@@ -186,11 +187,22 @@ func handleReplconf(c *Connection) error {
 }
 
 func handlePsync(request []string, rep *Replica) error {
+	emptyRDB := "UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog=="
+	emptyBinaryRDB, err1 := base64.StdEncoding.DecodeString(emptyRDB)
+	if err1 != nil {
+		return fmt.Errorf("DecodeString failed: %v", err1)
+	}
+
 	if request[0] == "?" {
-		err := rep.Conn.Write(fmt.Sprintf("+FULLRESYNC %s 0\r\n", rep.MasterReplid))
-		if err != nil {
-			return fmt.Errorf("Write failed: %v", err)
+		err2 := rep.Conn.Write(fmt.Sprintf("+FULLRESYNC %s 0\r\n", rep.MasterReplid))
+		if err2 != nil {
+			return fmt.Errorf("Write failed: %v", err2)
 		}
+	}
+
+	err := rep.Conn.Write(fmt.Sprintf("$%d\r\n%s", len(string(emptyBinaryRDB)), string(emptyBinaryRDB)))
+	if err != nil {
+		return fmt.Errorf("Write failed: %v", err)
 	}
 
 	return nil
