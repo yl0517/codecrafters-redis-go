@@ -17,7 +17,7 @@ var opts struct {
 
 func NewReplica(conn *protocol.Connection) *protocol.Replica {
 	return &protocol.Replica{
-		C:                conn,
+		Conn:             conn,
 		RepInfo:          opts.ReplicaOf,
 		MasterReplid:     GenerateReplid(),
 		MasterReplOffset: "0",

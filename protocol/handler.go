@@ -23,7 +23,7 @@ func NewEntry(s string, t int64) *Entry {
 }
 
 type Replica struct {
-	C                *Connection
+	Conn             *Connection
 	RepInfo          string
 	MasterReplid     string
 	MasterReplOffset string
@@ -32,28 +32,28 @@ type Replica struct {
 // HandleRequest responds to the request recieved.
 func HandleRequest(rep *Replica, request []string) error {
 	if request[0] == "PING" {
-		err := handlePing(rep.C)
+		err := handlePing(rep.Conn)
 		if err != nil {
 			return fmt.Errorf("PING failed: %v", err)
 		}
 	}
 
 	if request[0] == "ECHO" {
-		err := handleEcho(rep.C, request[1])
+		err := handleEcho(rep.Conn, request[1])
 		if err != nil {
 			return fmt.Errorf("ECHO failed: %v", err)
 		}
 	}
 
 	if request[0] == "SET" {
-		err := handleSet(rep.C, request[1:])
+		err := handleSet(rep.Conn, request[1:])
 		if err != nil {
 			return fmt.Errorf("SET failed: %v", err)
 		}
 	}
 
 	if request[0] == "GET" {
-		err := handleGet(rep.C, request[1])
+		err := handleGet(rep.Conn, request[1])
 		if err != nil {
 			return fmt.Errorf("GET failed: %v", err)
 		}
@@ -67,7 +67,14 @@ func HandleRequest(rep *Replica, request []string) error {
 	}
 
 	if request[0] == "REPLCONF" {
-		err := handleReplconf(rep.C)
+		err := handleReplconf(rep.Conn)
+		if err != nil {
+			return fmt.Errorf("REPLCONF failed: %v", err)
+		}
+	}
+
+	if request[0] == "PSYNC" {
+		err := handlePsync(request[1:], rep)
 		if err != nil {
 			return fmt.Errorf("REPLCONF failed: %v", err)
 		}
@@ -162,7 +169,7 @@ func handleInfo(arg string, rep *Replica) error {
 		s += fmt.Sprintf("master_repl_offset:%s\r\n", rep.MasterReplOffset)
 	}
 
-	err := rep.C.Write(fmt.Sprintf("$%d\r\n%s\r\n", len(s), s))
+	err := rep.Conn.Write(fmt.Sprintf("$%d\r\n%s\r\n", len(s), s))
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
 	}
@@ -173,6 +180,17 @@ func handleReplconf(c *Connection) error {
 	err := c.Write("+OK\r\n")
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
+	}
+
+	return nil
+}
+
+func handlePsync(request []string, rep *Replica) error {
+	if request[0] == "?" {
+		err := rep.Conn.Write(fmt.Sprintf("+FULLRESYNC %s 0\r\n", rep.MasterReplid))
+		if err != nil {
+			return fmt.Errorf("Write failed: %v", err)
+		}
 	}
 
 	return nil
