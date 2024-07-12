@@ -7,56 +7,51 @@ import (
 	"time"
 )
 
-var cache = map[string]*Entry{}
-
-// Entry represents the cache entry.
-type Entry struct {
-	msg      string
-	expireAt int64
+// Server represents a server
+type Server struct {
+	conn    *Connection
+	opts    Opts
+	storage *Storage
 }
 
-// NewEntry is the Entry constructor.
-func NewEntry(s string, t int64) *Entry {
-	return &Entry{
-		msg:      s,
-		expireAt: t,
+// NewServer is the server constructor
+func NewServer(conn *Connection, o Opts) *Server {
+	return &Server{
+		conn:    conn,
+		opts:    o,
+		storage: NewStorage(),
 	}
 }
 
-// Server represents a server
-type Server struct {
-	Conn             *Connection
-	RepInfo          string
-	MasterReplid     string
-	MasterReplOffset string
-}
-
 // HandleRequest responds to the request recieved.
-func HandleRequest(server *Server, request []string, Repls map[string]*Connection) error {
+func HandleRequest(server *Server, request []string) error {
 	if request[0] == "PING" {
-		err := handlePing(server.Conn)
+		err := handlePing(server.conn)
 		if err != nil {
 			return fmt.Errorf("PING failed: %v", err)
 		}
 	}
 
 	if request[0] == "ECHO" {
-		err := handleEcho(server.Conn, request[1])
+		err := handleEcho(server.conn, request[1])
 		if err != nil {
 			return fmt.Errorf("ECHO failed: %v", err)
 		}
 	}
 
 	if request[0] == "SET" {
-		err := handleSet(server.Conn, request[1:])
+		err := handleSet(server, request[1:])
 		if err != nil {
 			return fmt.Errorf("SET failed: %v", err)
 		}
-		handlePropagation(request, Repls)
+
+		if server.opts.Role == "master" {
+			handlePropagation(request)
+		}
 	}
 
 	if request[0] == "GET" {
-		err := handleGet(server.Conn, request[1])
+		err := handleGet(server, request[1])
 		if err != nil {
 			return fmt.Errorf("GET failed: %v", err)
 		}
@@ -70,11 +65,11 @@ func HandleRequest(server *Server, request []string, Repls map[string]*Connectio
 	}
 
 	if request[0] == "REPLCONF" {
-		err := handleReplconf(server.Conn)
+		err := handleReplconf(server.conn)
 		if err != nil {
 			return fmt.Errorf("REPLCONF failed: %v", err)
 		}
-		remoteAddr, conn := server.Conn.conn.RemoteAddr().String(), server.Conn
+		remoteAddr, conn := server.conn.conn.RemoteAddr().String(), server.conn
 		Repls[remoteAddr] = conn
 	}
 
@@ -106,7 +101,7 @@ func handlePing(c *Connection) error {
 	return nil
 }
 
-func handleSet(c *Connection, request []string) error {
+func handleSet(s *Server, request []string) error {
 	key := request[0]
 	value := request[1]
 
@@ -119,9 +114,9 @@ func handleSet(c *Connection, request []string) error {
 		expireAt = time.Now().UnixMilli() + expireAfter
 	}
 
-	cache[key] = NewEntry(value, expireAt)
+	s.storage.cache[key] = NewEntry(value, expireAt)
 
-	err := c.Write("+OK\r\n")
+	err := s.conn.Write("+OK\r\n")
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
 	}
@@ -129,12 +124,12 @@ func handleSet(c *Connection, request []string) error {
 	return nil
 }
 
-func handleGet(c *Connection, key string) error {
+func handleGet(s *Server, key string) error {
 	now := time.Now().UnixMilli()
 
-	entry, ok := cache[key]
+	entry, ok := s.storage.cache[key]
 	if !ok {
-		err := c.Write("$-1\r\n")
+		err := s.conn.Write("$-1\r\n")
 		if err != nil {
 			return fmt.Errorf("Write failed: %v", err)
 		}
@@ -142,15 +137,15 @@ func handleGet(c *Connection, key string) error {
 	}
 
 	if entry.expireAt != 0 && now > entry.expireAt {
-		err := c.Write("$-1\r\n")
+		err := s.conn.Write("$-1\r\n")
 		if err != nil {
 			return fmt.Errorf("Write failed: %v", err)
 		}
-		delete(cache, key)
+		delete(s.storage.cache, key)
 		return nil
 	}
 
-	err := c.Write(fmt.Sprintf("$%d\r\n%s\r\n", len(entry.msg), entry.msg))
+	err := s.conn.Write(fmt.Sprintf("$%d\r\n%s\r\n", len(entry.msg), entry.msg))
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
 	}
@@ -163,18 +158,18 @@ func handleInfo(arg string, server *Server) error {
 
 	if arg == "replication" {
 		s += "# Replication\r\n"
-		if server.RepInfo != "" {
+		if server.opts.Role == "slave" {
 			s += "role:slave\r\n"
 		} else {
 			s += "role:master\r\n"
 		}
 
-		s += fmt.Sprintf("master_replid:%s\r\n", server.MasterReplid)
+		s += fmt.Sprintf("master_replid:%s\r\n", server.opts.ReplID)
 
-		s += fmt.Sprintf("master_repl_offset:%s\r\n", server.MasterReplOffset)
+		s += fmt.Sprintf("master_repl_offset:%d\r\n", server.opts.ReplOffset)
 	}
 
-	err := server.Conn.Write(fmt.Sprintf("$%d\r\n%s\r\n", len(s), s))
+	err := server.conn.Write(fmt.Sprintf("$%d\r\n%s\r\n", len(s), s))
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
 	}
@@ -197,13 +192,13 @@ func handlePsync(request []string, server *Server) error {
 	}
 
 	if request[0] == "?" {
-		err2 := server.Conn.Write(fmt.Sprintf("+FULLRESYNC %s 0\r\n", server.MasterReplid))
+		err2 := server.conn.Write(fmt.Sprintf("+FULLRESYNC %s 0\r\n", server.opts.ReplID))
 		if err2 != nil {
 			return fmt.Errorf("Write failed: %v", err2)
 		}
 	}
 
-	err := server.Conn.Write(fmt.Sprintf("$%d\r\n%s", len(string(emptyRDB)), string(emptyRDB)))
+	err := server.conn.Write(fmt.Sprintf("$%d\r\n%s", len(string(emptyRDB)), string(emptyRDB)))
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
 	}
@@ -211,7 +206,7 @@ func handlePsync(request []string, server *Server) error {
 	return nil
 }
 
-func handlePropagation(command []string, Repls map[string]*Connection) error {
+func handlePropagation(command []string) error {
 	propCmd := ToRespArray(command)
 	fmt.Print(propCmd)
 

@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"math/rand"
 	"net"
 	"os"
 
@@ -10,49 +9,28 @@ import (
 	"github.com/jessevdk/go-flags"
 )
 
-// Repls stores address and connection of replications
-var Repls = map[string]*protocol.Connection{}
-
-var opts struct {
-	PortNum   string `long:"port" description:"Port Number" default:"6379"`
-	ReplicaOf string `long:"replicaof" description:"Replica of <MASTER_HOST> <MASTER_PORT>" default:""`
-}
-
-// NewReplica creates a new replica
-func NewReplica(conn *protocol.Connection) *protocol.Server {
-	return &protocol.Server{
-		Conn:             conn,
-		RepInfo:          opts.ReplicaOf,
-		MasterReplid:     GenerateReplid(),
-		MasterReplOffset: "0",
-	}
-}
-
-// GenerateReplid create a pseudo random alphanumeric string of 40 characters
-func GenerateReplid() string {
-	const letterBytes = "abcdefghijklmnopqrstuvwxyz1234567890"
-
-	b := make([]byte, 40)
-	for i := range b {
-		b[i] = letterBytes[rand.Intn(len(letterBytes))]
-	}
-	return string(b)
-}
-
 func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Println("Logs from your program will appear here!")
+
+	var opts protocol.Opts
 
 	_, err := flags.Parse(&opts)
 	if err != nil {
 		fmt.Println("flags.Parse failed:", err.Error())
 	}
 
-	if opts.ReplicaOf != "" {
-		protocol.ReplConnection(opts.ReplicaOf, opts.PortNum)
+	opts.Config()
+
+	if opts.Role != "master" {
+		connectToMaster(opts)
 	}
 
-	l, err := net.Listen("tcp", "0.0.0.0:"+opts.PortNum)
+	runMaster(opts)
+}
+
+func runMaster(o protocol.Opts) {
+	l, err := net.Listen("tcp", "0.0.0.0:"+o.PortNum)
 	if err != nil {
 		fmt.Println("Failed to bind to port")
 		os.Exit(1)
@@ -65,58 +43,38 @@ func main() {
 			os.Exit(1)
 		}
 
-		go handleConnection(conn)
+		go handleMasterConnection(conn, o)
 	}
 }
 
-func handleConnection(c net.Conn) {
+// handleReplConnection handles replication
+func connectToMaster(o protocol.Opts) {
+	addr := fmt.Sprintf("%s:%s", o.MasterHost, o.MasterPort)
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		fmt.Println("net.Dial() failed: ", err.Error())
+	}
+
+	c := protocol.NewConnection(conn)
+	protocol.Handshake(c, o)
+}
+
+func handleMasterConnection(c net.Conn, o protocol.Opts) {
 	conn := protocol.NewConnection(c)
+	server := protocol.NewServer(conn, o)
 
 	defer conn.Close()
 
 	for {
-		numElem, err := conn.GetLine()
+		request, err := conn.Read()
 		if err != nil {
-			fmt.Println("conn.GetLine() failed: ", err.Error())
+			fmt.Printf("conn.Read() failed: %v\n", err)
 			return
 		}
 
-		len, err := protocol.GetArrayLength(numElem)
+		err = protocol.HandleRequest(server, request)
 		if err != nil {
-			fmt.Println("protocol.GetLength() failed: ", err.Error())
-			return
+			fmt.Printf("protocol.HandleRequest() failed: %v\n", err)
 		}
-
-		var request []string
-
-		for i := 0; i < len; i++ {
-			line, err := conn.GetLine()
-			if err != nil {
-				fmt.Println("conn.GetLine() failed: ", err.Error())
-				return
-			}
-
-			len, err := protocol.GetBulkStringLength(line)
-			if err != nil {
-				fmt.Println("protocol.GetBulkStringLength() failed: ", err.Error())
-				return
-			}
-
-			s, err := conn.GetLine()
-			if err != nil {
-				fmt.Println("conn.GetLine() failed: ", err.Error())
-				return
-			}
-
-			err = protocol.VerifyBulkStringLength(s, len)
-			if err != nil {
-				fmt.Println("protocol.VerifyBulkStringLength() failed: ", err.Error())
-				return
-			}
-
-			request = append(request, s)
-		}
-
-		protocol.HandleRequest(NewReplica(conn), request, Repls)
 	}
 }

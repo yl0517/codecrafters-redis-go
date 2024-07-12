@@ -55,3 +55,44 @@ func (c *Connection) Write(s string) error {
 	}
 	return nil
 }
+
+// Read takes a RESP array and returns the individual requests inside a slice
+func (c *Connection) Read() ([]string, error) {
+	numElem, err := c.GetLine()
+	if err != nil {
+		return nil, fmt.Errorf("c.GetLine() failed: %w", err)
+	}
+
+	len, err := GetArrayLength(numElem)
+	if err != nil {
+		return nil, fmt.Errorf("GetArrayLength() failed: %w", err)
+	}
+
+	var request []string
+
+	for i := 0; i < len; i++ {
+		line, err := c.GetLine()
+		if err != nil {
+			return nil, fmt.Errorf("c.GetLine() failed: %w", err)
+		}
+
+		len, err := GetBulkStringLength(line)
+		if err != nil {
+			return nil, fmt.Errorf("GetBulkStringLength() failed: %w", err)
+		}
+
+		s, err := c.GetLine()
+		if err != nil {
+			return nil, fmt.Errorf("c.GetLine() failed: %w", err)
+		}
+
+		err = VerifyBulkStringLength(s, len)
+		if err != nil {
+			return nil, fmt.Errorf("VerifyBulkStringLength() failed: %w", err)
+		}
+
+		request = append(request, s)
+	}
+
+	return request, nil
+}

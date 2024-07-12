@@ -2,25 +2,10 @@ package protocol
 
 import (
 	"fmt"
-	"net"
-	"strings"
 )
 
-// ReplConnection handles replication
-func ReplConnection(server string, port string) {
-	addrArr := strings.Split(server, " ")
-	addr := fmt.Sprintf("%s:%s", addrArr[0], addrArr[1])
-	conn, err := net.Dial("tcp", addr)
-	if err != nil {
-		fmt.Println("net.Dial() failed: ", err.Error())
-	}
-
-	c := NewConnection(conn)
-	Handshake(c, port)
-}
-
-// Handshake handles the handshake process between primary and secondary
-func Handshake(c *Connection, port string) {
+// Handshake handles the handshake process from slave
+func Handshake(c *Connection, o Opts) {
 	err := sendPing(c)
 	if err != nil {
 		fmt.Println("sendPing failed: ", err.Error())
@@ -37,7 +22,7 @@ func Handshake(c *Connection, port string) {
 		fmt.Println("Didn't recieve \"PONG\": ", response)
 	}
 
-	err = sendReplconf(c, port)
+	err = sendReplconf(c, o.PortNum)
 	if err != nil {
 		fmt.Println("sendReplconf failed: ", err.Error())
 		return
