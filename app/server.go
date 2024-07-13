@@ -10,9 +10,6 @@ import (
 )
 
 func main() {
-	// You can use print statements as follows for debugging, they'll be visible when running tests.
-	fmt.Println("Logs from your program will appear here!")
-
 	var opts protocol.Opts
 
 	_, err := flags.Parse(&opts)
@@ -23,7 +20,7 @@ func main() {
 	opts.Config()
 
 	if opts.Role != "master" {
-		connectToMaster(opts)
+		go connectToMaster(opts)
 	}
 
 	runMaster(opts)
@@ -43,7 +40,10 @@ func runMaster(o protocol.Opts) {
 			os.Exit(1)
 		}
 
-		go handleMasterConnection(conn, o)
+		c := protocol.NewConnection(conn)
+		server := protocol.NewServer(c, o)
+
+		go server.Handle()
 	}
 }
 
@@ -56,25 +56,13 @@ func connectToMaster(o protocol.Opts) {
 	}
 
 	c := protocol.NewConnection(conn)
-	protocol.Handshake(c, o)
-}
+	server := protocol.NewServer(c, o)
 
-func handleMasterConnection(c net.Conn, o protocol.Opts) {
-	conn := protocol.NewConnection(c)
-	server := protocol.NewServer(conn, o)
-
-	defer conn.Close()
-
-	for {
-		request, err := conn.Read()
-		if err != nil {
-			fmt.Printf("conn.Read() failed: %v\n", err)
-			return
-		}
-
-		err = protocol.HandleRequest(server, request)
-		if err != nil {
-			fmt.Printf("protocol.HandleRequest() failed: %v\n", err)
-		}
+	err = server.Handshake()
+	if err != nil {
+		fmt.Println("Handshake failed:", err.Error())
+		return
 	}
+
+	server.Handle()
 }

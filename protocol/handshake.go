@@ -2,33 +2,42 @@ package protocol
 
 import (
 	"fmt"
+	"io"
+	"strconv"
 )
 
 // Handshake handles the handshake process from slave
-func Handshake(c *Connection, o Opts) {
-	err := sendPing(c)
+func (s *Server) Handshake() error {
+	err := sendPing(s.c)
 	if err != nil {
-		fmt.Println("sendPing failed: ", err.Error())
-		return
+		return fmt.Errorf("sendPing failed: %v", err)
 	}
 
-	response, err := c.GetLine()
+	response, err := s.c.GetLine()
 	if err != nil {
-		fmt.Println("conn.GetLine() failed: ", err.Error())
-		return
+		return fmt.Errorf("conn.GetLine() failed: %v", err)
 	}
 
 	if response != "+PONG" {
-		fmt.Println("Didn't recieve \"PONG\": ", response)
+		return fmt.Errorf("Didn't receive \"PONG\": %s", response)
 	}
 
-	err = sendReplconf(c, o.PortNum)
+	err = sendReplconf(s.c, s.opts.PortNum)
 	if err != nil {
-		fmt.Println("sendReplconf failed: ", err.Error())
-		return
+		return fmt.Errorf("sendReplconf failed: %v", err)
 	}
 
-	sendPsync(c)
+	err = sendPsync(s.c)
+	if err != nil {
+		return fmt.Errorf("sendPsync failed: %v", err)
+	}
+
+	err = readRDB(s.c)
+	if err != nil {
+		return fmt.Errorf("readRDB failed: %v", err)
+	}
+
+	return nil
 }
 
 func sendPing(c *Connection) error {
@@ -72,5 +81,42 @@ func sendPsync(c *Connection) error {
 	if err != nil {
 		return fmt.Errorf("c.Write failed: %v", err)
 	}
+
+	full, err := c.GetLine()
+	if err != nil {
+		return fmt.Errorf("conn.GetLine failed: %v", err)
+	}
+
+	if full[:11] != "+FULLRESYNC" {
+		return fmt.Errorf("Didn't recieve \"+FULLRESYNC\": %s", full)
+	}
+
+	return nil
+}
+
+func readRDB(c *Connection) error {
+	token, err := c.GetLine()
+	fmt.Println("Received RDB token:", token)
+	if err != nil {
+		return fmt.Errorf("conn.GetLine failed: %v", err)
+	}
+
+	if token[0] != '$' {
+		return fmt.Errorf("Expected $, got %c", token[0])
+	}
+
+	rdbLen, err := strconv.Atoi(token[1:])
+	fmt.Println("RDB length: ", rdbLen)
+	if err != nil {
+		return fmt.Errorf("Atoi failed: %v", err)
+	}
+
+	temp := make([]byte, rdbLen)
+	rdbContent, err := io.ReadFull(c.reader, temp)
+	if err != nil {
+		return fmt.Errorf("ReadFull() failed: %v", err)
+	}
+	fmt.Println("Read RDB content length:", rdbContent)
+
 	return nil
 }
