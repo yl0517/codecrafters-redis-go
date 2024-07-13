@@ -19,10 +19,11 @@ func NewServer(conn *Connection, o Opts) *Server {
 	return &Server{
 		c:       conn,
 		opts:    o,
-		storage: NewStorage(),
+		storage: storage,
 	}
 }
 
+// Handle reads and handles requests
 func (s *Server) Handle() {
 	defer s.c.Close()
 
@@ -33,7 +34,7 @@ func (s *Server) Handle() {
 			return
 		}
 
-		err = HandleRequest(s, request)
+		err = s.HandleRequest(request)
 		if err != nil {
 			fmt.Printf("protocol.HandleRequest() failed: %v\n", err)
 		}
@@ -41,14 +42,14 @@ func (s *Server) Handle() {
 }
 
 // HandleRequest responds to the request recieved.
-func HandleRequest(server *Server, request []string) error {
+func (s *Server) HandleRequest(request []string) error {
 	if len(request) == 0 {
 		return fmt.Errorf("empty request")
 	}
 
 	switch request[0] {
 	case "PING":
-		err := handlePing(server.c)
+		err := handlePing(s.c)
 		if err != nil {
 			return fmt.Errorf("PING failed: %v", err)
 		}
@@ -56,19 +57,17 @@ func HandleRequest(server *Server, request []string) error {
 		if len(request) != 2 {
 			return fmt.Errorf("ECHO expects 1 argument")
 		}
-		err := handleEcho(server.c, request[1])
+		err := handleEcho(s.c, request[1])
 		if err != nil {
 			return fmt.Errorf("ECHO failed: %v", err)
 		}
 	case "SET":
-		err := handleSet(server, request[1:])
+		err := handleSet(s, request[1:])
 		if err != nil {
 			return fmt.Errorf("SET failed: %v", err)
 		}
 
-		fmt.Println("testing set in handlereq")
-
-		if server.opts.Role == "master" {
+		if s.opts.Role == "master" {
 			err := handlePropagation(request)
 			if err != nil {
 				return fmt.Errorf("Propagation failed: %v", err)
@@ -78,36 +77,27 @@ func HandleRequest(server *Server, request []string) error {
 		if len(request) != 2 {
 			return fmt.Errorf("GET expects 1 argument")
 		}
-		err := handleGet(server, request[1])
+		err := handleGet(s, request[1])
 		if err != nil {
 			return fmt.Errorf("GET failed: %v", err)
-		}
-
-		fmt.Println("testing get in handlereq")
-
-		if server.opts.Role == "master" {
-			err := handlePropagation(request)
-			if err != nil {
-				return fmt.Errorf("Propagation failed: %v", err)
-			}
 		}
 	case "INFO":
 		if len(request) != 2 {
 			return fmt.Errorf("INFO expects 1 argument")
 		}
-		err := handleInfo(request[1], server)
+		err := handleInfo(request[1], s)
 		if err != nil {
 			return fmt.Errorf("INFO failed: %v", err)
 		}
 	case "REPLCONF":
-		err := handleReplconf(server.c)
+		err := handleReplconf(s.c)
 		if err != nil {
 			return fmt.Errorf("REPLCONF failed: %v", err)
 		}
-		remoteAddr, conn := server.c.conn.RemoteAddr().String(), server.c
+		remoteAddr, conn := s.c.conn.RemoteAddr().String(), s.c
 		Repls[remoteAddr] = conn
 	case "PSYNC":
-		err := handlePsync(request[1:], server)
+		err := handlePsync(request[1:], s)
 		if err != nil {
 			return fmt.Errorf("PSYNC failed: %v", err)
 		}
@@ -149,17 +139,17 @@ func handleSet(s *Server, request []string) error {
 		}
 		expireAt = time.Now().UnixMilli() + expireAfter
 	}
-	fmt.Println("set test 1.5")
+	fmt.Println("set test 2")
 
 	s.storage.cache[key] = NewEntry(value, expireAt)
 
-	fmt.Println("set test 2")
+	fmt.Println("set test 3")
 	err := s.c.Write("+OK\r\n")
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
 	}
 
-	fmt.Println("set test 3")
+	fmt.Println("set test 4")
 	return nil
 }
 
@@ -254,7 +244,6 @@ func handlePsync(request []string, server *Server) error {
 
 func handlePropagation(command []string) error {
 	propCmd := ToRespArray(command)
-	fmt.Println("testing propagation " + propCmd)
 
 	for _, conn := range Repls {
 		err := conn.Write(propCmd)

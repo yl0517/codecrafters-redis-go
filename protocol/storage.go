@@ -1,5 +1,11 @@
 package protocol
 
+var storage = NewStorage()
+
+// func init() {
+// 	storage = NewStorage()
+// }
+
 // Entry represents the cache entry.
 type Entry struct {
 	msg      string
