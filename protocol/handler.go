@@ -268,7 +268,10 @@ func handlePropagation(request []string) error {
 }
 
 func handleWait(request []string, s *Server) error {
-	err := s.c.Write(":0\r\n")
+	// numReplicas := request[1]
+	// timeout := request[2]
+
+	err := s.c.Write(fmt.Sprintf(":%d\r\n", len(Repls)))
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
 	}
