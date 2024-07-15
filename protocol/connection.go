@@ -26,8 +26,10 @@ func (c *Connection) Close() error {
 }
 
 // GetLine returns an individual line from a command without CRLF
-func (c *Connection) GetLine() (string, error) {
+func (c *Connection) GetLine() (int, string, error) {
 	s, err := c.reader.ReadString('\n')
+
+	numBytes := len(s)
 
 	if len(s) > 0 {
 		if s[len(s)-1] == '\n' {
@@ -39,7 +41,7 @@ func (c *Connection) GetLine() (string, error) {
 		}
 	}
 
-	return s, err
+	return numBytes, s, err
 }
 
 // Write writes the given string to the connection
@@ -56,43 +58,46 @@ func (c *Connection) Write(s string) error {
 	return nil
 }
 
-// Read takes a RESP array and returns the individual requests inside a slice
-func (c *Connection) Read() ([]string, error) {
-	numElem, err := c.GetLine()
+// Read takes a RESP array and returns the individual requests inside a slice and the offset
+func (c *Connection) Read() (int, []string, error) {
+	bytes, numElem, err := c.GetLine()
 	if err != nil {
-		return nil, fmt.Errorf("c.GetLine() failed: %w", err)
+		return 0, nil, fmt.Errorf("c.GetLine() failed: %w", err)
 	}
+	offset := bytes
 
 	len, err := GetArrayLength(numElem)
 	if err != nil {
-		return nil, fmt.Errorf("GetArrayLength() failed: %w", err)
+		return 0, nil, fmt.Errorf("GetArrayLength() failed: %w", err)
 	}
 
 	var request []string
 
 	for i := 0; i < len; i++ {
-		line, err := c.GetLine()
+		bytes, line, err := c.GetLine()
 		if err != nil {
-			return nil, fmt.Errorf("c.GetLine() failed: %w", err)
+			return 0, nil, fmt.Errorf("c.GetLine() failed: %w", err)
 		}
+		offset += bytes
 
 		len, err := GetBulkStringLength(line)
 		if err != nil {
-			return nil, fmt.Errorf("GetBulkStringLength() failed: %w", err)
+			return 0, nil, fmt.Errorf("GetBulkStringLength() failed: %w", err)
 		}
 
-		s, err := c.GetLine()
+		bytes, s, err := c.GetLine()
 		if err != nil {
-			return nil, fmt.Errorf("c.GetLine() failed: %w", err)
+			return 0, nil, fmt.Errorf("c.GetLine() failed: %w", err)
 		}
+		offset += bytes
 
 		err = VerifyBulkStringLength(s, len)
 		if err != nil {
-			return nil, fmt.Errorf("VerifyBulkStringLength() failed: %w", err)
+			return 0, nil, fmt.Errorf("VerifyBulkStringLength() failed: %w", err)
 		}
 
 		request = append(request, s)
 	}
 
-	return request, nil
+	return offset, request, nil
 }

@@ -28,13 +28,17 @@ func (s *Server) Handle() {
 	defer s.c.Close()
 
 	for {
-		request, err := s.c.Read()
+		offset, request, err := s.c.Read()
 		if err != nil {
 			fmt.Printf("conn.Read() failed: %v\n", err)
 			return
 		}
 
-		err = s.HandleRequest(request)
+		if s.opts.Role != "master" && (len(request) <= 1 || request[1] != "GETACK") {
+			s.opts.ReplOffset += offset
+		}
+
+		err = s.HandleRequest(request, offset)
 		if err != nil {
 			fmt.Printf("protocol.HandleRequest() failed: %v\n", err)
 		}
@@ -42,14 +46,14 @@ func (s *Server) Handle() {
 }
 
 // HandleRequest responds to the request recieved.
-func (s *Server) HandleRequest(request []string) error {
+func (s *Server) HandleRequest(request []string, offset int) error {
 	if len(request) == 0 {
 		return fmt.Errorf("empty request")
 	}
 
 	switch request[0] {
 	case "PING":
-		err := handlePing(s.c)
+		err := handlePing(s)
 		if err != nil {
 			return fmt.Errorf("PING failed: %v", err)
 		}
@@ -90,7 +94,7 @@ func (s *Server) HandleRequest(request []string) error {
 			return fmt.Errorf("INFO failed: %v", err)
 		}
 	case "REPLCONF":
-		err := handleReplconf(s, request[1:])
+		err := handleReplconf(s, request[1:], offset)
 		if err != nil {
 			return fmt.Errorf("REPLCONF failed: %v", err)
 		}
@@ -117,10 +121,12 @@ func handleEcho(c *Connection, message string) error {
 	return nil
 }
 
-func handlePing(c *Connection) error {
-	err := c.Write("+PONG\r\n")
-	if err != nil {
-		return fmt.Errorf("Write failed: %v", err)
+func handlePing(s *Server) error {
+	if s.opts.Role == "master" {
+		err := s.c.Write("+PONG\r\n")
+		if err != nil {
+			return fmt.Errorf("Write failed: %v", err)
+		}
 	}
 
 	return nil
@@ -141,9 +147,11 @@ func handleSet(s *Server, request []string) error {
 
 	s.storage.cache[key] = NewEntry(value, expireAt)
 
-	err := s.c.Write("+OK\r\n")
-	if err != nil {
-		return fmt.Errorf("Write failed: %v", err)
+	if s.opts.Role == "master" {
+		err := s.c.Write("+OK\r\n")
+		if err != nil {
+			return fmt.Errorf("Write failed: %v", err)
+		}
 	}
 
 	return nil
@@ -201,13 +209,15 @@ func handleInfo(arg string, server *Server) error {
 	return nil
 }
 
-func handleReplconf(s *Server, request []string) error {
+func handleReplconf(s *Server, request []string, offset int) error {
 	switch request[0] {
 	case "GETACK":
 		err := s.c.Write(fmt.Sprintf("*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$%d\r\n%d\r\n", len(strconv.Itoa(s.opts.ReplOffset)), s.opts.ReplOffset))
 		if err != nil {
 			return fmt.Errorf("Write failed: %v", err)
 		}
+
+		s.opts.ReplOffset += offset
 	default:
 		err := s.c.Write("+OK\r\n")
 		if err != nil {

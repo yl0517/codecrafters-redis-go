@@ -13,7 +13,7 @@ func (s *Server) Handshake() error {
 		return fmt.Errorf("sendPing failed: %v", err)
 	}
 
-	response, err := s.c.GetLine()
+	_, response, err := s.c.GetLine()
 	if err != nil {
 		return fmt.Errorf("conn.GetLine() failed: %v", err)
 	}
@@ -50,7 +50,7 @@ func sendPing(c *Connection) error {
 
 func sendReplconf(c *Connection, port string) error {
 	c.Write(fmt.Sprintf("*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$%d\r\n%s\r\n", len(port), port))
-	ok, err := c.GetLine()
+	_, ok, err := c.GetLine()
 	if err != nil {
 		return fmt.Errorf("conn.GetLine failed: %v", err)
 	}
@@ -64,7 +64,7 @@ func sendReplconf(c *Connection, port string) error {
 		return fmt.Errorf("c.Write failed: %v", err)
 	}
 
-	ok, err = c.GetLine()
+	_, ok, err = c.GetLine()
 	if err != nil {
 		return fmt.Errorf("conn.GetLine failed: %v", err)
 	}
@@ -82,7 +82,7 @@ func sendPsync(c *Connection) error {
 		return fmt.Errorf("c.Write failed: %v", err)
 	}
 
-	full, err := c.GetLine()
+	_, full, err := c.GetLine()
 	if err != nil {
 		return fmt.Errorf("conn.GetLine failed: %v", err)
 	}
@@ -95,7 +95,7 @@ func sendPsync(c *Connection) error {
 }
 
 func readRDB(c *Connection) error {
-	token, err := c.GetLine()
+	_, token, err := c.GetLine()
 	fmt.Println("Received RDB token:", token)
 	if err != nil {
 		return fmt.Errorf("conn.GetLine failed: %v", err)
