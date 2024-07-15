@@ -61,7 +61,7 @@ func (s *Server) HandleRequest(request []string, offset int) error {
 		if len(request) != 2 {
 			return fmt.Errorf("ECHO expects 1 argument")
 		}
-		err := handleEcho(s.c, request[1])
+		err := handleEcho(s, request[1])
 		if err != nil {
 			return fmt.Errorf("ECHO failed: %v", err)
 		}
@@ -105,6 +105,11 @@ func (s *Server) HandleRequest(request []string, offset int) error {
 		if err != nil {
 			return fmt.Errorf("PSYNC failed: %v", err)
 		}
+	case "WAIT":
+		err := handleWait(request[1:], s)
+		if err != nil {
+			return fmt.Errorf("WAIT failed: %v", err)
+		}
 	default:
 		return fmt.Errorf("unknown command: %s", request[0])
 	}
@@ -112,8 +117,8 @@ func (s *Server) HandleRequest(request []string, offset int) error {
 	return nil
 }
 
-func handleEcho(c *Connection, message string) error {
-	err := c.Write(fmt.Sprintf("$%d\r\n%s\r\n", len(message), message))
+func handleEcho(s *Server, message string) error {
+	err := s.c.Write(fmt.Sprintf("$%d\r\n%s\r\n", len(message), message))
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
 	}
@@ -249,14 +254,23 @@ func handlePsync(request []string, server *Server) error {
 	return nil
 }
 
-func handlePropagation(command []string) error {
-	propCmd := ToRespArray(command)
+func handlePropagation(request []string) error {
+	propCmd := ToRespArray(request)
 
 	for _, conn := range Repls {
 		err := conn.Write(propCmd)
 		if err != nil {
 			return fmt.Errorf("Write failed: %v", err)
 		}
+	}
+
+	return nil
+}
+
+func handleWait(request []string, s *Server) error {
+	err := s.c.Write(":0\r\n")
+	if err != nil {
+		return fmt.Errorf("Write failed: %v", err)
 	}
 
 	return nil
