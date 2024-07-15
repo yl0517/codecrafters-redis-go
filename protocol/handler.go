@@ -23,7 +23,7 @@ func NewServer(conn *Connection, o Opts) *Server {
 	}
 }
 
-// Handle reads and handles requests
+// Handle reads and handles
 func (s *Server) Handle() {
 	defer s.c.Close()
 
@@ -90,7 +90,7 @@ func (s *Server) HandleRequest(request []string) error {
 			return fmt.Errorf("INFO failed: %v", err)
 		}
 	case "REPLCONF":
-		err := handleReplconf(s.c)
+		err := handleReplconf(s, request[1:])
 		if err != nil {
 			return fmt.Errorf("REPLCONF failed: %v", err)
 		}
@@ -127,7 +127,6 @@ func handlePing(c *Connection) error {
 }
 
 func handleSet(s *Server, request []string) error {
-	fmt.Println("set test 1")
 	key := request[0]
 	value := request[1]
 
@@ -139,22 +138,18 @@ func handleSet(s *Server, request []string) error {
 		}
 		expireAt = time.Now().UnixMilli() + expireAfter
 	}
-	fmt.Println("set test 2")
 
 	s.storage.cache[key] = NewEntry(value, expireAt)
 
-	fmt.Println("set test 3")
 	err := s.c.Write("+OK\r\n")
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
 	}
 
-	fmt.Println("set test 4")
 	return nil
 }
 
 func handleGet(s *Server, key string) error {
-	fmt.Println("get test 1")
 	now := time.Now().UnixMilli()
 
 	entry, ok := s.storage.cache[key]
@@ -166,8 +161,6 @@ func handleGet(s *Server, key string) error {
 		return nil
 	}
 
-	fmt.Println("get test 2")
-
 	if entry.expireAt != 0 && now > entry.expireAt {
 		err := s.c.Write("$-1\r\n")
 		if err != nil {
@@ -177,14 +170,10 @@ func handleGet(s *Server, key string) error {
 		return nil
 	}
 
-	fmt.Println("get test 3")
-
 	err := s.c.Write(fmt.Sprintf("$%d\r\n%s\r\n", len(entry.msg), entry.msg))
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
 	}
-
-	fmt.Println("get test 4")
 
 	return nil
 }
@@ -212,10 +201,18 @@ func handleInfo(arg string, server *Server) error {
 	return nil
 }
 
-func handleReplconf(c *Connection) error {
-	err := c.Write("+OK\r\n")
-	if err != nil {
-		return fmt.Errorf("Write failed: %v", err)
+func handleReplconf(s *Server, request []string) error {
+	switch request[0] {
+	case "GETACK":
+		err := s.c.Write(fmt.Sprintf("*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$%d\r\n%d\r\n", len(strconv.Itoa(s.opts.ReplOffset)), s.opts.ReplOffset))
+		if err != nil {
+			return fmt.Errorf("Write failed: %v", err)
+		}
+	default:
+		err := s.c.Write("+OK\r\n")
+		if err != nil {
+			return fmt.Errorf("Write failed: %v", err)
+		}
 	}
 
 	return nil
