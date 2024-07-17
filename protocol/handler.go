@@ -38,7 +38,7 @@ func (s *Server) Handle() {
 			s.opts.ReplOffset += offset
 		}
 
-		err = s.HandleRequest(request, offset)
+		err = s.HandleRequest(request)
 		if err != nil {
 			fmt.Printf("protocol.HandleRequest() failed: %v\n", err)
 		}
@@ -46,7 +46,7 @@ func (s *Server) Handle() {
 }
 
 // HandleRequest responds to the request recieved.
-func (s *Server) HandleRequest(request []string, offset int) error {
+func (s *Server) HandleRequest(request []string) error {
 	if len(request) == 0 {
 		return fmt.Errorf("empty request")
 	}
@@ -94,7 +94,7 @@ func (s *Server) HandleRequest(request []string, offset int) error {
 			return fmt.Errorf("INFO failed: %v", err)
 		}
 	case "REPLCONF":
-		err := handleReplconf(s, request[1:], offset)
+		err := handleReplconf(s, request[1:])
 		if err != nil {
 			return fmt.Errorf("REPLCONF failed: %v", err)
 		}
@@ -214,7 +214,7 @@ func handleInfo(arg string, server *Server) error {
 	return nil
 }
 
-func handleReplconf(s *Server, request []string, offset int) error {
+func handleReplconf(s *Server, request []string) error {
 	switch request[0] {
 	case "GETACK":
 		err := s.c.Write(fmt.Sprintf("*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$%d\r\n%d\r\n", len(strconv.Itoa(s.opts.ReplOffset)), s.opts.ReplOffset))
@@ -222,7 +222,7 @@ func handleReplconf(s *Server, request []string, offset int) error {
 			return fmt.Errorf("Write failed: %v", err)
 		}
 
-		s.opts.ReplOffset += offset
+		s.opts.ReplOffset += 37
 	default:
 		err := s.c.Write("+OK\r\n")
 		if err != nil {

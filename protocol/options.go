@@ -21,11 +21,11 @@ type Opts struct {
 func (o *Opts) Config() {
 	o.Role = "master"
 	o.ReplID = generateReplid()
+	o.ReplOffset = 0
 
 	if o.ReplicaOf != "" {
 		o.Role = "slave"
 		o.ReplID = ""
-		o.ReplOffset = 0
 
 		hostAndPort := strings.Split(o.ReplicaOf, " ")
 		o.MasterHost = hostAndPort[0]
