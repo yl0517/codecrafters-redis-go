@@ -41,7 +41,7 @@ func runMaster(o protocol.Opts) {
 		}
 
 		c := protocol.NewConnection(conn)
-		server := protocol.NewServer(c, o)
+		server := protocol.NewMaster(c, o)
 
 		go server.Handle()
 	}
@@ -56,9 +56,9 @@ func connectToMaster(o protocol.Opts) {
 	}
 
 	c := protocol.NewConnection(conn)
-	server := protocol.NewServer(c, o)
+	server := protocol.NewSlave(c)
 
-	err = server.Handshake()
+	err = server.Handshake(o)
 	if err != nil {
 		fmt.Println("Handshake failed:", err.Error())
 		return

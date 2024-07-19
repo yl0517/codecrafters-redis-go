@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -12,14 +13,30 @@ type Server struct {
 	c       *Connection
 	opts    Opts
 	storage *Storage
+	offset  int
+
+	// for master only
+	slaves *Repls
 }
 
-// NewServer is the server constructor
-func NewServer(conn *Connection, o Opts) *Server {
+// NewMaster is the master constructor
+func NewMaster(conn *Connection, o Opts) *Server {
 	return &Server{
 		c:       conn,
 		opts:    o,
 		storage: storage,
+		offset:  0,
+		slaves:  repls,
+	}
+}
+
+// NewSlave is the slave constructor
+func NewSlave(conn *Connection) *Server {
+	return &Server{
+		c: conn,
+		// opts:    o,
+		storage: storage,
+		offset:  0,
 	}
 }
 
@@ -27,20 +44,26 @@ func NewServer(conn *Connection, o Opts) *Server {
 func (s *Server) Handle() {
 	defer s.c.Close()
 
+	// if s.opts.Role != "master" {
+	// 	s.Handshake()
+	// }
+
 	for {
-		offset, request, err := s.c.Read()
+		o, request, err := s.Read()
 		if err != nil {
 			fmt.Printf("conn.Read() failed: %v\n", err)
 			return
 		}
 
-		if s.opts.Role != "master" && (len(request) <= 1 || request[1] != "GETACK") {
-			s.opts.ReplOffset += offset
-		}
+		fmt.Printf("Received request: %v\n", request)
 
 		err = s.HandleRequest(request)
 		if err != nil {
 			fmt.Printf("protocol.HandleRequest() failed: %v\n", err)
+		}
+
+		if s.opts.Role != "master" && (len(request) <= 1 || request[1] != "GETACK") {
+			s.offset += o
 		}
 	}
 }
@@ -51,7 +74,9 @@ func (s *Server) HandleRequest(request []string) error {
 		return fmt.Errorf("empty request")
 	}
 
-	switch request[0] {
+	// var remoteAddr string
+
+	switch strings.ToUpper(request[0]) {
 	case "PING":
 		err := handlePing(s)
 		if err != nil {
@@ -72,7 +97,7 @@ func (s *Server) HandleRequest(request []string) error {
 		}
 
 		if s.opts.Role == "master" {
-			err := handlePropagation(request)
+			err := handlePropagation(s, request)
 			if err != nil {
 				return fmt.Errorf("Propagation failed: %v", err)
 			}
@@ -98,13 +123,13 @@ func (s *Server) HandleRequest(request []string) error {
 		if err != nil {
 			return fmt.Errorf("REPLCONF failed: %v", err)
 		}
-		remoteAddr, conn := s.c.conn.RemoteAddr().String(), s.c
-		Repls[remoteAddr] = conn
 	case "PSYNC":
 		err := handlePsync(request[1:], s)
 		if err != nil {
 			return fmt.Errorf("PSYNC failed: %v", err)
 		}
+
+		s.AddSlave(s.c)
 	case "WAIT":
 		err := handleWait(request[1:], s)
 		if err != nil {
@@ -141,7 +166,7 @@ func handleSet(s *Server, request []string) error {
 	key := request[0]
 	value := request[1]
 
-	var expireAt int64 // initially zero
+	var expireAt int64
 	if len(request) == 4 {
 		expireAfter, err := strconv.ParseInt(request[3], 10, 64)
 		if err != nil {
@@ -204,7 +229,7 @@ func handleInfo(arg string, server *Server) error {
 
 		s += fmt.Sprintf("master_replid:%s\r\n", server.opts.ReplID)
 
-		s += fmt.Sprintf("master_repl_offset:%d\r\n", server.opts.ReplOffset)
+		s += fmt.Sprintf("master_repl_offset:%d\r\n", server.offset)
 	}
 
 	err := server.c.Write(fmt.Sprintf("$%d\r\n%s\r\n", len(s), s))
@@ -217,12 +242,14 @@ func handleInfo(arg string, server *Server) error {
 func handleReplconf(s *Server, request []string) error {
 	switch request[0] {
 	case "GETACK":
-		err := s.c.Write(fmt.Sprintf("*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$%d\r\n%d\r\n", len(strconv.Itoa(s.opts.ReplOffset)), s.opts.ReplOffset))
+		fmt.Printf("Slave %s received GETACK\n", s.opts.PortNum)
+		err := s.c.Write(fmt.Sprintf("*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$%d\r\n%d\r\n", len(strconv.Itoa(s.offset)), s.offset))
 		if err != nil {
 			return fmt.Errorf("Write failed: %v", err)
 		}
 
-		s.opts.ReplOffset += 37
+		s.offset += 37
+		fmt.Printf("Slave %s new offset: %d\n", s.opts.PortNum, s.offset)
 	default:
 		err := s.c.Write("+OK\r\n")
 		if err != nil {
@@ -254,27 +281,101 @@ func handlePsync(request []string, server *Server) error {
 	return nil
 }
 
-func handlePropagation(request []string) error {
+func handlePropagation(s *Server, request []string) error {
 	propCmd := ToRespArray(request)
 
-	for _, conn := range Repls {
-		err := conn.Write(propCmd)
+	for _, slave := range s.slaves.repls {
+		err := slave.c.Write(propCmd)
 		if err != nil {
 			return fmt.Errorf("Write failed: %v", err)
 		}
+		// slave.offset += len(propCmd)
+
 	}
+	s.offset += len(propCmd)
 
 	return nil
 }
 
 func handleWait(request []string, s *Server) error {
-	// numReplicas := request[1]
-	// timeout := request[2]
 
-	err := s.c.Write(fmt.Sprintf(":%d\r\n", len(Repls)))
+	fmt.Println("testing wait 1")
+
+	numReplicas, err := strconv.Atoi(request[0])
+	if err != nil {
+		return fmt.Errorf("Atoi failed: %v", err)
+	}
+
+	t, err := strconv.Atoi(request[1])
+	if err != nil {
+		return fmt.Errorf("Atoi failed: %v", err)
+	}
+
+	timeout := time.After(time.Duration(t) * time.Millisecond)
+
+	acked := 0
+
+	fmt.Printf("testing wait 2: %d\n", acked)
+
+	for _, slave := range s.slaves.repls {
+
+		fmt.Printf("slave %d\n", slave.offset)
+		fmt.Printf("master %d\n", s.offset)
+
+		if slave.offset == s.offset {
+			acked++
+
+			fmt.Printf("offset 1: %d\n", slave.offset)
+		}
+	}
+
+	fmt.Printf("testing wait 3: %d\n", acked)
+
+	if acked >= numReplicas {
+		err = s.c.Write(fmt.Sprintf(":%d\r\n", acked))
+		if err != nil {
+			return fmt.Errorf("Write failed: %v", err)
+		}
+
+		return nil
+	}
+
+	// getack := ToRespArray([]string{"REPLCONF", "GETACK", "*"})
+
+	for _, slave := range s.slaves.repls {
+		err = slave.c.Write("*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n")
+		if err != nil {
+			return fmt.Errorf("Write failed: %v", err)
+		}
+
+		fmt.Printf("offset 2: %d\n", slave.offset)
+	}
+
+	s.offset += 37
+
+	fmt.Printf("Master new offset after GETACK: %d\n", s.offset)
+
+	<-timeout
+
+	acked = 0
+	for _, slave := range s.slaves.repls {
+
+		fmt.Printf("slave %d\n", slave.offset)
+		fmt.Printf("master %d\n", s.offset)
+
+		if slave.offset == s.offset {
+			acked++
+
+			fmt.Printf("offset 3: %d\n", slave.offset)
+		}
+	}
+
+	err = s.c.Write(fmt.Sprintf(":%d\r\n", acked))
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
 	}
+
+	fmt.Printf("testing wait 5: %d\n", acked)
 
 	return nil
 }

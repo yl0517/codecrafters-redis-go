@@ -59,12 +59,18 @@ func (c *Connection) Write(s string) error {
 }
 
 // Read takes a RESP array and returns the individual requests inside a slice and the offset
-func (c *Connection) Read() (int, []string, error) {
-	bytes, numElem, err := c.GetLine()
+func (s *Server) Read() (int, []string, error) {
+	var o int
+
+	// defer func() {
+	// 	s.offset += o
+	// }()
+
+	bytes, numElem, err := s.c.GetLine()
 	if err != nil {
 		return 0, nil, fmt.Errorf("c.GetLine() failed: %w", err)
 	}
-	offset := bytes
+	o += bytes
 
 	len, err := GetArrayLength(numElem)
 	if err != nil {
@@ -74,22 +80,22 @@ func (c *Connection) Read() (int, []string, error) {
 	var request []string
 
 	for i := 0; i < len; i++ {
-		bytes, line, err := c.GetLine()
+		bytes, line, err := s.c.GetLine()
 		if err != nil {
 			return 0, nil, fmt.Errorf("c.GetLine() failed: %w", err)
 		}
-		offset += bytes
+		o += bytes
 
 		len, err := GetBulkStringLength(line)
 		if err != nil {
 			return 0, nil, fmt.Errorf("GetBulkStringLength() failed: %w", err)
 		}
 
-		bytes, s, err := c.GetLine()
+		bytes, s, err := s.c.GetLine()
 		if err != nil {
 			return 0, nil, fmt.Errorf("c.GetLine() failed: %w", err)
 		}
-		offset += bytes
+		o += bytes
 
 		err = VerifyBulkStringLength(s, len)
 		if err != nil {
@@ -99,5 +105,5 @@ func (c *Connection) Read() (int, []string, error) {
 		request = append(request, s)
 	}
 
-	return offset, request, nil
+	return o, request, nil
 }

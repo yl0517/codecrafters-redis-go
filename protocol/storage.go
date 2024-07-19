@@ -28,5 +28,16 @@ func NewStorage() *Storage {
 	}
 }
 
-// Repls stores address and connection of replications
-var Repls = map[string]*Connection{}
+var repls = NewRepls()
+
+// Repls store secondary connections
+type Repls struct {
+	repls map[string]*Server
+}
+
+// NewRepls is the Repls constructor
+func NewRepls() *Repls {
+	return &Repls{
+		repls: make(map[string]*Server),
+	}
+}

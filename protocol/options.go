@@ -7,12 +7,13 @@ import (
 
 // Opts represents the options given by user
 type Opts struct {
-	PortNum   string `long:"port" description:"Port Number" default:"6379"`
-	ReplicaOf string `long:"replicaof" description:"Replica of <MASTER_HOST> <MASTER_PORT>" default:""`
+	PortNum    string `short:"p" long:"port" description:"Port Number" default:"6379"`
+	ReplicaOf  string `long:"replicaof" description:"Replica of <MASTER_HOST> <MASTER_PORT>"`
+	Dir        string `long:"dir" description:"Path to the directory where RDB file is stored"`
+	Dbfilename string `long:"dbfilename" description:"name of RDB file"`
 
 	Role       string
 	ReplID     string
-	ReplOffset int
 	MasterHost string
 	MasterPort string
 }
@@ -21,7 +22,6 @@ type Opts struct {
 func (o *Opts) Config() {
 	o.Role = "master"
 	o.ReplID = generateReplid()
-	o.ReplOffset = 0
 
 	if o.ReplicaOf != "" {
 		o.Role = "slave"
@@ -42,4 +42,10 @@ func generateReplid() string {
 		b[i] = letterBytes[rand.Intn(len(letterBytes))]
 	}
 	return string(b)
+}
+
+func (s *Server) AddSlave(conn *Connection) {
+	if s.opts.Role == "master" {
+		s.slaves.repls[conn.conn.RemoteAddr().String()] = NewSlave(conn)
+	}
 }

@@ -7,7 +7,7 @@ import (
 )
 
 // Handshake handles the handshake process from slave
-func (s *Server) Handshake() error {
+func (s *Server) Handshake(o Opts) error {
 	err := sendPing(s.c)
 	if err != nil {
 		return fmt.Errorf("sendPing failed: %v", err)
@@ -22,7 +22,7 @@ func (s *Server) Handshake() error {
 		return fmt.Errorf("Didn't receive \"PONG\": %s", response)
 	}
 
-	err = sendReplconf(s.c, s.opts.PortNum)
+	err = sendReplconf(s.c, o.PortNum)
 	if err != nil {
 		return fmt.Errorf("sendReplconf failed: %v", err)
 	}
