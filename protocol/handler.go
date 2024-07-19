@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -17,6 +18,7 @@ type Server struct {
 
 	// for master only
 	slaves *Repls
+	wg     *sync.WaitGroup
 }
 
 // NewMaster is the master constructor
@@ -25,7 +27,6 @@ func NewMaster(conn *Connection, o Opts) *Server {
 		c:       conn,
 		opts:    o,
 		storage: storage,
-		offset:  0,
 		slaves:  repls,
 	}
 }
@@ -33,20 +34,14 @@ func NewMaster(conn *Connection, o Opts) *Server {
 // NewSlave is the slave constructor
 func NewSlave(conn *Connection) *Server {
 	return &Server{
-		c: conn,
-		// opts:    o,
+		c:       conn,
 		storage: storage,
-		offset:  0,
 	}
 }
 
 // Handle reads and handles
 func (s *Server) Handle() {
 	defer s.c.Close()
-
-	// if s.opts.Role != "master" {
-	// 	s.Handshake()
-	// }
 
 	for {
 		o, request, err := s.Read()
@@ -239,19 +234,35 @@ func handleInfo(arg string, server *Server) error {
 	return nil
 }
 
-func handleReplconf(s *Server, request []string) error {
+func handleReplconf(master *Server, request []string) error {
 	switch request[0] {
+	case "ACK":
+		// This logic is ran by master
+		ack, err := strconv.Atoi(request[1])
+		if err != nil {
+			return fmt.Errorf("strconf.Atoi failed: %v", err)
+		}
+		slaveAddr := master.c.conn.RemoteAddr().String()
+		slave, ok := master.slaves.repls[slaveAddr]
+		if !ok {
+			return fmt.Errorf("not registered slave sent me unsolicited response: %s", slaveAddr)
+		}
+
+		slave.offset = ack
+
+		if master.wg != nil {
+			master.wg.Done()
+		}
 	case "GETACK":
-		fmt.Printf("Slave %s received GETACK\n", s.opts.PortNum)
-		err := s.c.Write(fmt.Sprintf("*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$%d\r\n%d\r\n", len(strconv.Itoa(s.offset)), s.offset))
+		// This logic is ran by slave
+		err := master.c.Write(fmt.Sprintf("*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$%d\r\n%d\r\n", len(strconv.Itoa(master.offset)), master.offset))
 		if err != nil {
 			return fmt.Errorf("Write failed: %v", err)
 		}
 
-		s.offset += 37
-		fmt.Printf("Slave %s new offset: %d\n", s.opts.PortNum, s.offset)
+		master.offset += 37
 	default:
-		err := s.c.Write("+OK\r\n")
+		err := master.c.Write("+OK\r\n")
 		if err != nil {
 			return fmt.Errorf("Write failed: %v", err)
 		}
@@ -278,29 +289,26 @@ func handlePsync(request []string, server *Server) error {
 		return fmt.Errorf("Write failed: %v", err)
 	}
 
+	server.AddSlave(server.c)
+
 	return nil
 }
 
-func handlePropagation(s *Server, request []string) error {
+func handlePropagation(master *Server, request []string) error {
 	propCmd := ToRespArray(request)
 
-	for _, slave := range s.slaves.repls {
-		err := slave.c.Write(propCmd)
+	for _, slave := range master.slaves.repls {
+		err := slave.Write(propCmd)
 		if err != nil {
 			return fmt.Errorf("Write failed: %v", err)
 		}
-		// slave.offset += len(propCmd)
-
 	}
-	s.offset += len(propCmd)
+	master.offset += len(propCmd)
 
 	return nil
 }
 
-func handleWait(request []string, s *Server) error {
-
-	fmt.Println("testing wait 1")
-
+func handleWait(request []string, master *Server) error {
 	numReplicas, err := strconv.Atoi(request[0])
 	if err != nil {
 		return fmt.Errorf("Atoi failed: %v", err)
@@ -311,28 +319,16 @@ func handleWait(request []string, s *Server) error {
 		return fmt.Errorf("Atoi failed: %v", err)
 	}
 
-	timeout := time.After(time.Duration(t) * time.Millisecond)
-
 	acked := 0
 
-	fmt.Printf("testing wait 2: %d\n", acked)
-
-	for _, slave := range s.slaves.repls {
-
-		fmt.Printf("slave %d\n", slave.offset)
-		fmt.Printf("master %d\n", s.offset)
-
-		if slave.offset == s.offset {
+	for _, slave := range master.slaves.repls {
+		if slave.offset == master.offset {
 			acked++
-
-			fmt.Printf("offset 1: %d\n", slave.offset)
 		}
 	}
 
-	fmt.Printf("testing wait 3: %d\n", acked)
-
 	if acked >= numReplicas {
-		err = s.c.Write(fmt.Sprintf(":%d\r\n", acked))
+		err = master.c.Write(fmt.Sprintf(":%d\r\n", acked))
 		if err != nil {
 			return fmt.Errorf("Write failed: %v", err)
 		}
@@ -340,42 +336,40 @@ func handleWait(request []string, s *Server) error {
 		return nil
 	}
 
-	// getack := ToRespArray([]string{"REPLCONF", "GETACK", "*"})
-
-	for _, slave := range s.slaves.repls {
-		err = slave.c.Write("*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n")
+	for _, slave := range master.slaves.repls {
+		err = slave.Write("*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n")
 		if err != nil {
 			return fmt.Errorf("Write failed: %v", err)
 		}
-
-		fmt.Printf("offset 2: %d\n", slave.offset)
 	}
 
-	s.offset += 37
+	master.wg = &sync.WaitGroup{}
+	master.wg.Add(numReplicas)
 
-	fmt.Printf("Master new offset after GETACK: %d\n", s.offset)
+	ch := make(chan struct{})
+	go func() {
+		defer close(ch)
+		master.wg.Wait()
+	}()
 
-	<-timeout
+	select {
+	case <-ch:
+	case <-time.After(time.Duration(t) * time.Millisecond):
+	}
 
 	acked = 0
-	for _, slave := range s.slaves.repls {
-
-		fmt.Printf("slave %d\n", slave.offset)
-		fmt.Printf("master %d\n", s.offset)
-
-		if slave.offset == s.offset {
+	for _, slave := range master.slaves.repls {
+		if slave.offset == master.offset {
 			acked++
-
-			fmt.Printf("offset 3: %d\n", slave.offset)
 		}
 	}
 
-	err = s.c.Write(fmt.Sprintf(":%d\r\n", acked))
+	err = master.c.Write(fmt.Sprintf(":%d\r\n", acked))
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
 	}
 
-	fmt.Printf("testing wait 5: %d\n", acked)
+	master.offset += 37
 
 	return nil
 }

@@ -10,6 +10,7 @@ import (
 type Connection struct {
 	conn   net.Conn
 	reader *bufio.Reader
+	offset int
 }
 
 // NewConnection creates a new Connection instance.
@@ -17,6 +18,7 @@ func NewConnection(c net.Conn) *Connection {
 	return &Connection{
 		conn:   c,
 		reader: bufio.NewReader(c),
+		offset: 0,
 	}
 }
 

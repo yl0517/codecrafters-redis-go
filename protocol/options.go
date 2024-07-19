@@ -44,8 +44,9 @@ func generateReplid() string {
 	return string(b)
 }
 
+// AddSlave adds a slave to the list of slaves stored by master
 func (s *Server) AddSlave(conn *Connection) {
 	if s.opts.Role == "master" {
-		s.slaves.repls[conn.conn.RemoteAddr().String()] = NewSlave(conn)
+		s.slaves.repls[conn.conn.RemoteAddr().String()] = conn
 	}
 }

@@ -32,12 +32,12 @@ var repls = NewRepls()
 
 // Repls store secondary connections
 type Repls struct {
-	repls map[string]*Server
+	repls map[string]*Connection
 }
 
 // NewRepls is the Repls constructor
 func NewRepls() *Repls {
 	return &Repls{
-		repls: make(map[string]*Server),
+		repls: make(map[string]*Connection),
 	}
 }
