@@ -130,6 +130,15 @@ func (s *Server) HandleRequest(request []string) error {
 		if err != nil {
 			return fmt.Errorf("WAIT failed: %v", err)
 		}
+	case "CONFIG":
+		if request[1] == "GET" {
+			err := handleConfigGet(request[2:], s)
+			if err != nil {
+				return fmt.Errorf("Config Get failed: %v", err)
+			}
+		} else {
+			return fmt.Errorf("Invalid config command: %s", request[1])
+		}
 	default:
 		return fmt.Errorf("unknown command: %s", request[0])
 	}
@@ -370,6 +379,19 @@ func handleWait(request []string, master *Server) error {
 	}
 
 	master.offset += 37
+
+	return nil
+}
+
+func handleConfigGet(request []string, s *Server) error {
+	switch request[0] {
+	case "dir":
+		s.c.Write(fmt.Sprintf("*2\r\n$3\r\ndir\r\n$%d\r\n%s\r\n", len(s.opts.Dir), s.opts.Dir))
+	case "dbfilename":
+		s.c.Write(fmt.Sprintf("*2\r\n$3\r\ndbfilename\r\n$%d\r\n%s\r\n", len(s.opts.Dbfilename), s.opts.Dbfilename))
+	default:
+		return fmt.Errorf("Invalid config get param: %v", request[0])
+	}
 
 	return nil
 }
