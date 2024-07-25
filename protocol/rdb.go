@@ -80,13 +80,6 @@ func (file *File) getKVPair() (map[string]string, error) {
 		dbSelected = true
 	}
 
-	// _, _ = file.reader.ReadByte()
-	// _, _ = file.reader.ReadByte()
-	// _, _ = file.reader.ReadByte()
-	// _, _ = file.reader.ReadByte()
-	// _, _ = file.reader.ReadByte()
-	// _, _ = file.reader.ReadByte()
-
 	for {
 		b, err := file.reader.ReadByte()
 		if err != nil {
@@ -121,11 +114,6 @@ func (file *File) getKVPair() (map[string]string, error) {
 			key, err := file.parseString(b)
 			if err != nil {
 				return nil, fmt.Errorf("file.parseString failed for key: %v", err)
-			}
-
-			if key == "" {
-				fmt.Println("Ignored empty key") // Additional debug line
-				break                            // Ignore empty keys
 			}
 
 			b, err = file.reader.ReadByte()
