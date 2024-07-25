@@ -145,14 +145,7 @@ func (file *File) parseLength(b byte) (int, error) {
 
 		lastSixBits := b & 0b00111111
 		if lastSixBits == 1 {
-			next8bytes := append(next4bytes, make([]byte, 4)...)
-			_, err := file.reader.Read(next8bytes[4:])
-			if err != nil {
-				return 0, fmt.Errorf("Read failed: %v", err)
-			}
-			length := int(binary.BigEndian.Uint64(next8bytes))
-			fmt.Printf("Parsed length (10, 64 bits): %d\n", length) // Debug line
-			return length, nil
+			return int(binary.BigEndian.Uint64(next4bytes)), nil
 		} else if lastSixBits == 0 {
 			length := int(binary.BigEndian.Uint32(next4bytes))
 			fmt.Printf("Parsed length (10, 32 bits): %d\n", length) // Debug line
