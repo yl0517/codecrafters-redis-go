@@ -43,6 +43,8 @@ func NewSlave(conn *Connection) *Server {
 func (s *Server) Handle() {
 	defer s.c.Close()
 
+	processRDB(s)
+
 	for {
 		o, request, err := s.Read()
 		if err != nil {
@@ -404,6 +406,21 @@ func handleConfigGet(request []string, s *Server) error {
 		s.c.Write(fmt.Sprintf("*2\r\n$3\r\ndbfilename\r\n$%d\r\n%s\r\n", len(s.opts.Dbfilename), s.opts.Dbfilename))
 	default:
 		return fmt.Errorf("Invalid config get param: %v", request[0])
+	}
+
+	return nil
+}
+
+func handleKeys(s *Server) error {
+	var keys []string
+	for k := range s.storage.cache {
+		fmt.Printf("Found key: %s\n", k)
+		keys = append(keys, k)
+	}
+
+	err := s.c.Write(ToRespArray(keys))
+	if err != nil {
+		return fmt.Errorf("Write failed: %v", err)
 	}
 
 	return nil

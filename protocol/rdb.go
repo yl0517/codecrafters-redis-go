@@ -30,8 +30,8 @@ func NewFile(f *os.File) *File {
 	}
 }
 
-// handleKeys handles the KEYS command
-func handleKeys(s *Server) error {
+// processRDB handles the KEYS command
+func processRDB(s *Server) error {
 	path := fmt.Sprintf("%s/%s", s.opts.Dir, s.opts.Dbfilename)
 	f, err := os.Open(path)
 	if err != nil {
@@ -40,40 +40,25 @@ func handleKeys(s *Server) error {
 	defer f.Close()
 	file := NewFile(f)
 
-	kvpair, err := file.getKVPair()
+	err = s.addKVPair(file)
 	if err != nil {
 		return fmt.Errorf("getKeys failed: %v", err)
-	}
-
-	fmt.Printf("Found kvpair: %v\n", kvpair)
-
-	var keys []string
-	for k := range kvpair {
-		fmt.Printf("Found key: %s\n", k)
-		keys = append(keys, k)
-	}
-
-	err = s.c.Write(ToRespArray(keys))
-	if err != nil {
-		return fmt.Errorf("Write failed: %v", err)
 	}
 
 	return nil
 }
 
-// getKVPair parses key-value pairs from the RDB file
-func (file *File) getKVPair() (map[string]string, error) {
-	kvpair := make(map[string]string)
-
+// addKVPair parses key-value pairs from the RDB file
+func (s *Server) addKVPair(file *File) error {
 	dbSelected := false
 	for !dbSelected {
 		_, err := file.reader.ReadString(opSelectDB)
 		if err != nil {
-			return nil, fmt.Errorf("ReadString failed: %v", err)
+			return fmt.Errorf("ReadString failed: %v", err)
 		}
 		b, err := file.reader.ReadByte()
 		if err != nil {
-			return nil, fmt.Errorf("ReadByte failed: %v", err)
+			return fmt.Errorf("ReadByte failed: %v", err)
 		}
 		file.parseString(b)
 
@@ -83,7 +68,7 @@ func (file *File) getKVPair() (map[string]string, error) {
 	for {
 		b, err := file.reader.ReadByte()
 		if err != nil {
-			return nil, fmt.Errorf("ReadByte failed: %v", err)
+			return fmt.Errorf("ReadByte failed: %v", err)
 		}
 
 		switch b {
@@ -108,26 +93,26 @@ func (file *File) getKVPair() (map[string]string, error) {
 
 		case opEOF:
 			fmt.Println("Encountered opEOF")
-			return kvpair, nil
+			return nil
 
 		default:
 			key, err := file.parseString(b)
 			if err != nil {
-				return nil, fmt.Errorf("file.parseString failed for key: %v", err)
+				return fmt.Errorf("file.parseString failed for key: %v", err)
 			}
 
 			b, err = file.reader.ReadByte()
 			if err != nil {
-				return nil, fmt.Errorf("ReadByte failed: %v", err)
+				return fmt.Errorf("ReadByte failed: %v", err)
 			}
 
 			value, err := file.parseString(b)
 			if err != nil {
-				return nil, fmt.Errorf("file.parseString failed for value: %v", err)
+				return fmt.Errorf("file.parseString failed for value: %v", err)
 			}
 
 			fmt.Printf("Adding kv pair: %s, %s\n", key, value)
-			kvpair[key] = value
+			s.storage.cache[key] = NewEntry(value, 0)
 		}
 	}
 }
