@@ -63,6 +63,10 @@ func (s *Server) Handle() {
 	}
 }
 
+var (
+	waitLock = sync.Mutex{}
+)
+
 // HandleRequest responds to the request recieved.
 func (s *Server) HandleRequest(request []string) error {
 	if len(request) == 0 {
@@ -126,7 +130,9 @@ func (s *Server) HandleRequest(request []string) error {
 
 		s.AddSlave(s.c)
 	case "WAIT":
+		waitLock.Lock()
 		err := handleWait(request[1:], s)
+		waitLock.Unlock()
 		if err != nil {
 			return fmt.Errorf("WAIT failed: %v", err)
 		}
@@ -134,10 +140,17 @@ func (s *Server) HandleRequest(request []string) error {
 		if request[1] == "GET" {
 			err := handleConfigGet(request[2:], s)
 			if err != nil {
-				return fmt.Errorf("Config Get failed: %v", err)
+				return fmt.Errorf("CONFIG GET failed: %v", err)
 			}
 		} else {
-			return fmt.Errorf("Invalid config command: %s", request[1])
+			return fmt.Errorf("Invalid CONFIG command: %s", request[1])
+		}
+	case "KEYS":
+		if request[1] == "*" {
+			err := handleKeys(s)
+			if err != nil {
+				return fmt.Errorf("KEYS failed: %v", err)
+			}
 		}
 	default:
 		return fmt.Errorf("unknown command: %s", request[0])
@@ -243,7 +256,7 @@ func handleInfo(arg string, server *Server) error {
 	return nil
 }
 
-func handleReplconf(master *Server, request []string) error {
+func handleReplconf(server *Server, request []string) error {
 	switch request[0] {
 	case "ACK":
 		// This logic is ran by master
@@ -251,27 +264,27 @@ func handleReplconf(master *Server, request []string) error {
 		if err != nil {
 			return fmt.Errorf("strconf.Atoi failed: %v", err)
 		}
-		slaveAddr := master.c.conn.RemoteAddr().String()
-		slave, ok := master.slaves.repls[slaveAddr]
+		slaveAddr := server.c.conn.RemoteAddr().String()
+		slave, ok := server.slaves.repls[slaveAddr]
 		if !ok {
 			return fmt.Errorf("not registered slave sent me unsolicited response: %s", slaveAddr)
 		}
 
 		slave.offset = ack
 
-		if master.wg != nil {
-			master.wg.Done()
+		if server.wg != nil {
+			server.wg.Done()
 		}
 	case "GETACK":
 		// This logic is ran by slave
-		err := master.c.Write(fmt.Sprintf("*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$%d\r\n%d\r\n", len(strconv.Itoa(master.offset)), master.offset))
+		err := server.c.Write(fmt.Sprintf("*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$%d\r\n%d\r\n", len(strconv.Itoa(server.offset)), server.offset))
 		if err != nil {
 			return fmt.Errorf("Write failed: %v", err)
 		}
 
-		master.offset += 37
+		server.offset += 37
 	default:
-		err := master.c.Write("+OK\r\n")
+		err := server.c.Write("+OK\r\n")
 		if err != nil {
 			return fmt.Errorf("Write failed: %v", err)
 		}

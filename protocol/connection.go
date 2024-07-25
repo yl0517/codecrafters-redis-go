@@ -64,10 +64,6 @@ func (c *Connection) Write(s string) error {
 func (s *Server) Read() (int, []string, error) {
 	var o int
 
-	// defer func() {
-	// 	s.offset += o
-	// }()
-
 	bytes, numElem, err := s.c.GetLine()
 	if err != nil {
 		return 0, nil, fmt.Errorf("c.GetLine() failed: %w", err)
