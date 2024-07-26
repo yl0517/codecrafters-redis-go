@@ -154,10 +154,10 @@ func (s *Server) opCodeLoop(file *File) error {
 
 		fmt.Printf("Parsed value: %s\n", value)
 
-		if expireTime != nil {
+		if len(expireTime) != 0 {
 			exp := binary.BigEndian.Uint64(expireTime)
 			s.storage.cache[key] = NewEntry(value, int64(exp))
-		} else if expireTimeMS != nil {
+		} else if len(expireTimeMS) != 0 {
 			exp := binary.BigEndian.Uint64(expireTimeMS)
 			s.storage.cache[key] = NewEntry(value, int64(exp))
 		} else {
