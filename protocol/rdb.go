@@ -40,16 +40,16 @@ func processRDB(s *Server) error {
 	defer f.Close()
 	file := NewFile(f)
 
-	err = s.opCodeLoop(file)
+	err = s.addKVPair(file)
 	if err != nil {
-		return fmt.Errorf("opCodeLoop failed: %v", err)
+		return fmt.Errorf("addKVPair failed: %v", err)
 	}
 
 	return nil
 }
 
-// opCodeLoop parses opCodes from the RDB file
-func (s *Server) opCodeLoop(file *File) error {
+// addKVPair parses key-value pairs from the RDB file
+func (s *Server) addKVPair(file *File) error {
 	dbSelected := false
 	for !dbSelected {
 		b, err := file.reader.ReadByte()
@@ -79,21 +79,14 @@ func (s *Server) opCodeLoop(file *File) error {
 			return fmt.Errorf("ReadByte failed: %v", err)
 		}
 
-		expireTime := make([]byte, 4)
-		expireTimeMS := make([]byte, 8)
-
 		switch b {
 		case opExpireTime:
-			_, err := file.reader.Read(expireTime)
-			if err != nil {
-				return fmt.Errorf("Read failed for expireTime: %v", err)
-			}
+			fmt.Println("Encountered opExpireTime")
+			continue
 
 		case opExpireTimeMS:
-			_, err := file.reader.Read(expireTimeMS)
-			if err != nil {
-				return fmt.Errorf("Read failed for expireTime: %v", err)
-			}
+			fmt.Println("Encountered opExpireTimeMS")
+			continue
 
 		case opResizeDB:
 			fmt.Println("Encountered opResizeDB")
@@ -126,42 +119,35 @@ func (s *Server) opCodeLoop(file *File) error {
 		case opEOF:
 			fmt.Println("Encountered opEOF")
 			return nil
-		}
 
-		fmt.Printf("Parsing key-value pair, starting with byte: %08b\n", b)
+		default:
+			fmt.Printf("Parsing key-value pair, starting with byte: %08b\n", b)
 
-		key, err := file.parseString(b)
-		if err != nil {
-			return fmt.Errorf("file.parseString failed for key: %v", err)
-		}
+			key, err := file.parseString(b)
+			if err != nil {
+				return fmt.Errorf("file.parseString failed for key: %v", err)
+			}
 
-		if key == "" {
-			fmt.Println("Encountered an empty key, skipping")
-			continue
-		}
+			if key == "" {
+				fmt.Println("Encountered an empty key, skipping")
+				continue
+			}
 
-		fmt.Printf("Parsed key: %s\n", key)
+			fmt.Printf("Parsed key: %s\n", key)
 
-		b, err = file.reader.ReadByte()
-		if err != nil {
-			return fmt.Errorf("ReadByte failed: %v", err)
-		}
+			b, err = file.reader.ReadByte()
+			if err != nil {
+				return fmt.Errorf("ReadByte failed: %v", err)
+			}
 
-		value, err := file.parseString(b)
-		if err != nil {
-			return fmt.Errorf("file.parseString failed for value: %v", err)
-		}
+			value, err := file.parseString(b)
+			if err != nil {
+				return fmt.Errorf("file.parseString failed for value: %v", err)
+			}
 
-		fmt.Printf("Parsed value: %s\n", value)
+			fmt.Printf("Parsed value: %s\n", value)
 
-		if len(expireTime) != 0 {
-			exp := binary.BigEndian.Uint64(expireTime)
-			s.storage.cache[key] = NewEntry(value, int64(exp))
-		} else if len(expireTimeMS) != 0 {
-			exp := binary.BigEndian.Uint64(expireTimeMS)
-			s.storage.cache[key] = NewEntry(value, int64(exp))
-		} else {
-			fmt.Printf("Adding kv pair with no Expiry: %s, %s\n", key, value)
+			fmt.Printf("Adding kv pair: %s, %s\n", key, value)
 			s.storage.cache[key] = NewEntry(value, 0)
 		}
 	}
