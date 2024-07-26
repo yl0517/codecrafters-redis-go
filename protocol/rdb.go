@@ -42,7 +42,7 @@ func processRDB(s *Server) error {
 
 	err = s.addKVPair(file)
 	if err != nil {
-		return fmt.Errorf("getKeys failed: %v", err)
+		return fmt.Errorf("addKVPair failed: %v", err)
 	}
 
 	return nil
@@ -52,17 +52,25 @@ func processRDB(s *Server) error {
 func (s *Server) addKVPair(file *File) error {
 	dbSelected := false
 	for !dbSelected {
-		_, err := file.reader.ReadString(opSelectDB)
-		if err != nil {
-			return fmt.Errorf("ReadString failed: %v", err)
-		}
 		b, err := file.reader.ReadByte()
 		if err != nil {
 			return fmt.Errorf("ReadByte failed: %v", err)
 		}
-		file.parseString(b)
 
-		dbSelected = true
+		if b == opSelectDB {
+			dbSelected = true
+			lengthByte, err := file.reader.ReadByte()
+			if err != nil {
+				return fmt.Errorf("ReadByte failed for DB index length: %v", err)
+			}
+
+			dbIndex, err := file.parseLength(lengthByte)
+			if err != nil {
+				return fmt.Errorf("parseLength failed for DB index: %v", err)
+			}
+
+			fmt.Printf("Selected DB: %d\n", dbIndex)
+		}
 	}
 
 	for {
@@ -83,9 +91,26 @@ func (s *Server) addKVPair(file *File) error {
 		case opResizeDB:
 			fmt.Println("Encountered opResizeDB")
 			b, err = file.reader.ReadByte()
-			_, err = file.parseString(b) // Database hash table size
+			if err != nil {
+				return fmt.Errorf("ReadByte failed: %v", err)
+			}
+
+			dbHashTableSize, err := file.parseLength(b)
+			if err != nil {
+				return fmt.Errorf("parseLength failed for dbHashTableSize: %v", err)
+			}
+			fmt.Printf("dbHashTableSize: %d\n", dbHashTableSize)
+
 			b, err = file.reader.ReadByte()
-			_, err = file.parseString(b) // Expiry hash table size
+			if err != nil {
+				return fmt.Errorf("ReadByte failed: %v", err)
+			}
+
+			expireHashTableSize, err := file.parseLength(b)
+			if err != nil {
+				return fmt.Errorf("parseLength failed for expireHashTableSize: %v", err)
+			}
+			fmt.Printf("expireHashTableSize: %d\n", expireHashTableSize)
 
 		case opAux:
 			fmt.Println("Encountered opAux")
@@ -96,10 +121,19 @@ func (s *Server) addKVPair(file *File) error {
 			return nil
 
 		default:
+			fmt.Printf("Parsing key-value pair, starting with byte: %08b\n", b)
+
 			key, err := file.parseString(b)
 			if err != nil {
 				return fmt.Errorf("file.parseString failed for key: %v", err)
 			}
+
+			if key == "" {
+				fmt.Println("Encountered an empty key, skipping")
+				continue
+			}
+
+			fmt.Printf("Parsed key: %s\n", key)
 
 			b, err = file.reader.ReadByte()
 			if err != nil {
@@ -111,6 +145,8 @@ func (s *Server) addKVPair(file *File) error {
 				return fmt.Errorf("file.parseString failed for value: %v", err)
 			}
 
+			fmt.Printf("Parsed value: %s\n", value)
+
 			fmt.Printf("Adding kv pair: %s, %s\n", key, value)
 			s.storage.cache[key] = NewEntry(value, 0)
 		}
@@ -119,12 +155,12 @@ func (s *Server) addKVPair(file *File) error {
 
 // parseLength parses the length of the next object in the stream
 func (file *File) parseLength(b byte) (int, error) {
-	fmt.Printf("Parsing length from byte: %08b\n", b) // Debug line
+	fmt.Printf("Parsing length from byte: %08b\n", b)
 	msb := uint8(b >> 6)
 	switch msb {
 	case 0b00:
 		length := int(b & 0b00111111)
-		fmt.Printf("Parsed length (00): %d\n", length) // Debug line
+		fmt.Printf("Parsed length (00): %d\n", length)
 		return length, nil
 
 	case 0b01:
@@ -133,7 +169,7 @@ func (file *File) parseLength(b byte) (int, error) {
 			return 0, fmt.Errorf("ReadByte failed: %v", err)
 		}
 		length := (int(b&0b00111111) << 8) | int(nextByte)
-		fmt.Printf("Parsed length (01): %d\n", length) // Debug line
+		fmt.Printf("Parsed length (01): %d\n", length)
 		return length, nil
 
 	case 0b10:
@@ -143,17 +179,46 @@ func (file *File) parseLength(b byte) (int, error) {
 			return 0, fmt.Errorf("Read failed: %v", err)
 		}
 
-		lastSixBits := b & 0b00111111
-		if lastSixBits == 1 {
-			return int(binary.BigEndian.Uint64(next4bytes)), nil
-		} else if lastSixBits == 0 {
-			length := int(binary.BigEndian.Uint32(next4bytes))
-			fmt.Printf("Parsed length (10, 32 bits): %d\n", length) // Debug line
-			return length, nil
-		}
+		length := int(binary.BigEndian.Uint32(next4bytes))
+		fmt.Printf("Parsed length (10, 32 bits): %d\n", length)
+		return length, nil
 
 	case 0b11:
-		return 0, fmt.Errorf("special format not implemented")
+		lastSixBits := uint64(b & 0b00111111)
+
+		switch lastSixBits {
+		case 0:
+			l, err := file.reader.ReadByte()
+			if err != nil {
+				return 0, fmt.Errorf("ReadByte failed: %v", err)
+			}
+
+			length := int8(l)
+			fmt.Printf("Parsed length (11): %d\n", length)
+			return int(length), nil
+		case 1:
+			l := make([]byte, 2)
+			_, err := file.reader.Read(l)
+			if err != nil {
+				return 0, fmt.Errorf("ReadByte failed: %v", err)
+			}
+
+			length := binary.BigEndian.Uint16(l)
+			fmt.Printf("Parsed length (11): %d\n", length)
+			return int(length), nil
+		case 2:
+			l := make([]byte, 4)
+			_, err := file.reader.Read(l)
+			if err != nil {
+				return 0, fmt.Errorf("ReadByte failed: %v", err)
+			}
+
+			length := binary.BigEndian.Uint32(l)
+			fmt.Printf("Parsed length (11): %d\n", length)
+			return int(length), nil
+		default:
+			return 0, fmt.Errorf("invalid special encoding: %d", lastSixBits)
+		}
 	}
 
 	return 0, fmt.Errorf("invalid length encoding")
@@ -165,7 +230,7 @@ func (file *File) parseString(b byte) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("parseLength failed: %v", err)
 	}
-	fmt.Printf("String length: %d\n", length) // Debug line
+	fmt.Printf("String length: %d\n", length)
 
 	if length < 0 {
 		return "", fmt.Errorf("invalid string length: %d", length)
