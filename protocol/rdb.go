@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"time"
 )
 
 const (
@@ -73,6 +74,7 @@ func (s *Server) addKVPair(file *File) error {
 		}
 	}
 
+	var expiry int64 = 0
 	for {
 		b, err := file.reader.ReadByte()
 		if err != nil {
@@ -81,12 +83,18 @@ func (s *Server) addKVPair(file *File) error {
 
 		switch b {
 		case opExpireTime:
+			expiry, err = file.readExpireTime()
+			if err != nil {
+				return fmt.Errorf("readExpireTime failed: %v", err)
+			}
 			fmt.Println("Encountered opExpireTime")
-			continue
 
 		case opExpireTimeMS:
+			expiry, err = file.readExpireTimeMS()
+			if err != nil {
+				return fmt.Errorf("readExpireTimeMS failed: %v", err)
+			}
 			fmt.Println("Encountered opExpireTimeMS")
-			continue
 
 		case opResizeDB:
 			fmt.Println("Encountered opResizeDB")
@@ -145,12 +153,41 @@ func (s *Server) addKVPair(file *File) error {
 				return fmt.Errorf("file.parseString failed for value: %v", err)
 			}
 
-			fmt.Printf("Parsed value: %s\n", value)
+			// Check if the key is expired
+			if expiry > 0 && expiry < time.Now().Unix()*1000 {
+				fmt.Printf("Key %s has expired, skipping\n", key)
+				expiry = 0
+				continue
+			}
 
-			fmt.Printf("Adding kv pair: %s, %s\n", key, value)
-			s.storage.cache[key] = NewEntry(value, 0)
+			fmt.Printf("Parsed value: %s\n", value)
+			fmt.Printf("Adding kv pair with expiry: %s, %s, %d\n", key, value, expiry)
+			s.storage.cache[key] = NewEntry(value, expiry)
+			expiry = 0
 		}
 	}
+}
+
+// readExpireTime reads an expiry time in seconds
+func (file *File) readExpireTime() (int64, error) {
+	buf := make([]byte, 4)
+	_, err := file.reader.Read(buf)
+	if err != nil {
+		return 0, fmt.Errorf("Read failed: %v", err)
+	}
+	expiry := int64(binary.LittleEndian.Uint32(buf)) * 1000 // Convert to milliseconds
+	return expiry, nil
+}
+
+// readExpireTimeMS reads an expiry time in milliseconds
+func (file *File) readExpireTimeMS() (int64, error) {
+	buf := make([]byte, 8)
+	_, err := file.reader.Read(buf)
+	if err != nil {
+		return 0, fmt.Errorf("Read failed: %v", err)
+	}
+	expiry := int64(binary.LittleEndian.Uint64(buf))
+	return expiry, nil
 }
 
 // parseLength parses the length of the next object in the stream
