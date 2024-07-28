@@ -154,6 +154,11 @@ func (s *Server) HandleRequest(request []string) error {
 				return fmt.Errorf("KEYS failed: %v", err)
 			}
 		}
+	case "TYPE":
+		err := handleType(request[1:], s)
+		if err != nil {
+			return fmt.Errorf("TYPE failed: %v", err)
+		}
 	default:
 		return fmt.Errorf("unknown command: %s", request[0])
 	}
@@ -421,6 +426,27 @@ func handleKeys(s *Server) error {
 	err := s.c.Write(ToRespArray(keys))
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
+	}
+
+	return nil
+}
+
+func handleType(request []string, s *Server) error {
+	if len(request) > 1 {
+		return fmt.Errorf("Invalid key in type command: %s", request)
+	}
+
+	_, ok := s.storage.cache[request[0]]
+	if ok {
+		err := s.c.Write("+string\r\n")
+		if err != nil {
+			return fmt.Errorf("Write failed: %v", err)
+		}
+	} else {
+		err := s.c.Write("+none\r\n")
+		if err != nil {
+			return fmt.Errorf("Write failed: %v", err)
+		}
 	}
 
 	return nil
