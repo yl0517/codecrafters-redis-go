@@ -17,7 +17,7 @@ type Server struct {
 	offset  int
 
 	// for master only
-	slaves *Repls
+	slaves *Slaves
 	wg     *sync.WaitGroup
 }
 
@@ -60,7 +60,7 @@ func (s *Server) Handle() {
 		}
 
 		if s.opts.Role != "master" && (len(request) <= 1 || request[1] != "GETACK") {
-			s.offset += o
+			s.c.offset += o
 		}
 	}
 }
@@ -271,13 +271,10 @@ func handleReplconf(server *Server, request []string) error {
 		if err != nil {
 			return fmt.Errorf("strconf.Atoi failed: %v", err)
 		}
-		slaveAddr := server.c.conn.RemoteAddr().String()
-		slave, ok := server.slaves.repls[slaveAddr]
-		if !ok {
-			return fmt.Errorf("not registered slave sent me unsolicited response: %s", slaveAddr)
-		}
 
-		slave.offset = ack
+		if err := server.slaves.Ack(server.c.conn.RemoteAddr(), ack); err != nil {
+			return fmt.Errorf("ack slave response filed: %w", err)
+		}
 
 		if server.wg != nil {
 			server.wg.Done()
@@ -325,12 +322,8 @@ func handlePsync(request []string, server *Server) error {
 
 func handlePropagation(master *Server, request []string) error {
 	propCmd := ToRespArray(request)
-
-	for _, slave := range master.slaves.repls {
-		err := slave.Write(propCmd)
-		if err != nil {
-			return fmt.Errorf("Write failed: %v", err)
-		}
+	if err := master.slaves.Propagate(propCmd); err != nil {
+		return fmt.Errorf("cannot propagate: %w", err)
 	}
 	master.offset += len(propCmd)
 
@@ -348,13 +341,7 @@ func handleWait(request []string, master *Server) error {
 		return fmt.Errorf("Atoi failed: %v", err)
 	}
 
-	acked := 0
-
-	for _, slave := range master.slaves.repls {
-		if slave.offset == master.offset {
-			acked++
-		}
-	}
+	acked := master.slaves.SyncedSlaveCount(master.offset)
 
 	if acked >= numReplicas {
 		err = master.c.Write(fmt.Sprintf(":%d\r\n", acked))
@@ -365,15 +352,12 @@ func handleWait(request []string, master *Server) error {
 		return nil
 	}
 
-	for _, slave := range master.slaves.repls {
-		err = slave.Write("*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n")
-		if err != nil {
-			return fmt.Errorf("Write failed: %v", err)
-		}
+	if err := master.slaves.Propagate("*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n"); err != nil {
+		return fmt.Errorf("Write failed: %v", err)
 	}
 
 	master.wg = &sync.WaitGroup{}
-	master.wg.Add(numReplicas)
+	master.wg.Add(min(numReplicas, master.slaves.Count()))
 
 	ch := make(chan struct{})
 	go func() {
@@ -386,13 +370,9 @@ func handleWait(request []string, master *Server) error {
 	case <-time.After(time.Duration(t) * time.Millisecond):
 	}
 
-	acked = 0
-	for _, slave := range master.slaves.repls {
-		if slave.offset == master.offset {
-			acked++
-		}
-	}
+	acked = master.slaves.SyncedSlaveCount(master.offset)
 
+	fmt.Printf("master.offset = %d, acked = %d\n", master.offset, acked)
 	err = master.c.Write(fmt.Sprintf(":%d\r\n", acked))
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
