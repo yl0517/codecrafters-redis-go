@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-var repls = NewSlaves()
+var list = NewSlaves()
 
 // Slaves store secondary connections
 type Slaves struct {

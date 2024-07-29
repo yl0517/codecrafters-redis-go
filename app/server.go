@@ -33,6 +33,8 @@ func runMaster(o protocol.Opts) {
 		os.Exit(1)
 	}
 
+	mc := protocol.NewMasterConfig()
+
 	for {
 		conn, err := l.Accept()
 		if err != nil {
@@ -41,7 +43,7 @@ func runMaster(o protocol.Opts) {
 		}
 
 		c := protocol.NewConnection(conn)
-		server := protocol.NewMaster(c, o)
+		server := protocol.NewMaster(c, o, mc)
 
 		go server.Handle()
 	}
