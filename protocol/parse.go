@@ -51,3 +51,8 @@ func ToRespArray(arr []string) string {
 
 	return respArr
 }
+
+// ToBulkString turns a regular string into a bulk string
+func ToBulkString(s string) string {
+	return fmt.Sprintf("$%d\r\n%s\r\n", len(s), s)
+}

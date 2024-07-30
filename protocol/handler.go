@@ -176,6 +176,11 @@ func (s *Server) HandleRequest(request []string) error {
 		if err != nil {
 			return fmt.Errorf("TYPE failed: %v", err)
 		}
+	case "XADD":
+		err := handleXadd(request[1:], s)
+		if err != nil {
+			return fmt.Errorf("XADD failed: %v", err)
+		}
 	default:
 		return fmt.Errorf("unknown command: %s", request[0])
 	}
@@ -365,7 +370,7 @@ func handleWait(request []string, master *Server) error {
 	notAcked := master.mc.slaves.NotSyncedSlaveCount(master.mc.propOffset)
 
 	if notAcked == 0 {
-		err = master.c.Write(fmt.Sprintf(":%d\r\n", len(master.mc.slaves.list)))
+		err = master.c.Write(fmt.Sprintf(":%d\r\n", master.mc.slaves.Count()))
 		if err != nil {
 			return fmt.Errorf("Write failed: %v", err)
 		}
@@ -394,7 +399,7 @@ func handleWait(request []string, master *Server) error {
 	notAcked = master.mc.slaves.NotSyncedSlaveCount(master.mc.propOffset)
 
 	fmt.Printf("master.offset = %d, not acked = %d\n", master.mc.propOffset, notAcked)
-	err = master.c.Write(fmt.Sprintf(":%d\r\n", len(master.mc.slaves.list)-notAcked))
+	err = master.c.Write(fmt.Sprintf(":%d\r\n", master.mc.slaves.Count()-notAcked))
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
 	}
@@ -437,17 +442,53 @@ func handleType(request []string, s *Server) error {
 		return fmt.Errorf("Invalid key in type command: %s", request)
 	}
 
-	_, ok := s.storage.cache[request[0]]
+	fmt.Println(request[0])
+
+	_, ok := s.storage.streams[request[0]]
+	if ok {
+		err := s.c.Write("+stream\r\n")
+		if err != nil {
+			return fmt.Errorf("Write failed: %v", err)
+		}
+
+		return nil
+	}
+
+	_, ok = s.storage.cache[request[0]]
 	if ok {
 		err := s.c.Write("+string\r\n")
 		if err != nil {
 			return fmt.Errorf("Write failed: %v", err)
 		}
+
+		return nil
 	} else {
 		err := s.c.Write("+none\r\n")
 		if err != nil {
 			return fmt.Errorf("Write failed: %v", err)
 		}
+	}
+
+	return nil
+}
+
+func handleXadd(request []string, s *Server) error {
+	_, ok := s.storage.streams[request[0]]
+	if !ok {
+		s.storage.streams[request[0]] = NewStream()
+	}
+	stream := s.storage.streams[request[0]]
+
+	entry, err := NewStreamEntry(request[1], request[2:])
+	if err != nil {
+		return fmt.Errorf("NewStreamEntry failed: %v", err)
+	}
+
+	stream.entries = append(stream.entries, entry)
+
+	err = s.c.Write(ToBulkString(request[1]))
+	if err != nil {
+		return fmt.Errorf("Write failed: %v", err)
 	}
 
 	return nil
