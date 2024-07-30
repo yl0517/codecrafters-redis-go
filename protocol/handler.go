@@ -289,6 +289,8 @@ func handleReplconf(server *Server, request []string) error {
 			return fmt.Errorf("strconf.Atoi failed: %v", err)
 		}
 
+		fmt.Println("ack = ", ack)
+
 		if err := server.mc.slaves.Ack(server.c.conn.RemoteAddr(), ack); err != nil {
 			return fmt.Errorf("ack slave response filed: %w", err)
 		}
@@ -360,10 +362,10 @@ func handleWait(request []string, master *Server) error {
 		return fmt.Errorf("Atoi failed: %v", err)
 	}
 
-	acked := master.mc.slaves.SyncedSlaveCount(master.mc.propOffset)
+	notAcked := master.mc.slaves.NotSyncedSlaveCount(master.mc.propOffset)
 
-	if acked >= numReplicas {
-		err = master.c.Write(fmt.Sprintf(":%d\r\n", acked))
+	if notAcked == 0 {
+		err = master.c.Write(fmt.Sprintf(":%d\r\n", len(master.mc.slaves.list)))
 		if err != nil {
 			return fmt.Errorf("Write failed: %v", err)
 		}
@@ -389,10 +391,10 @@ func handleWait(request []string, master *Server) error {
 	case <-time.After(time.Duration(t) * time.Millisecond):
 	}
 
-	acked = master.mc.slaves.SyncedSlaveCount(master.mc.propOffset)
+	notAcked = master.mc.slaves.NotSyncedSlaveCount(master.mc.propOffset)
 
-	fmt.Printf("master.offset = %d, acked = %d\n", master.mc.propOffset, acked)
-	err = master.c.Write(fmt.Sprintf(":%d\r\n", acked))
+	fmt.Printf("master.offset = %d, not acked = %d\n", master.mc.propOffset, notAcked)
+	err = master.c.Write(fmt.Sprintf(":%d\r\n", len(master.mc.slaves.list)-notAcked))
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
 	}

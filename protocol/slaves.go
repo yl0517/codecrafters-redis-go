@@ -52,11 +52,13 @@ func (s *Slaves) Propagate(cmd string) error {
 			return fmt.Errorf("propagation write failed: %w", err)
 		}
 	}
+
+	fmt.Println("sent getack to slaves")
 	return nil
 }
 
 // SyncedSlaveCount returns the number of slaves that are synced with the given master status.
-func (s *Slaves) SyncedSlaveCount(masterOffset int) int {
+func (s *Slaves) NotSyncedSlaveCount(masterOffset int) int {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
@@ -64,7 +66,7 @@ func (s *Slaves) SyncedSlaveCount(masterOffset int) int {
 
 	for _, s := range s.list {
 		fmt.Println("s.offset = ", s.offset)
-		if s.offset == masterOffset {
+		if s.offset != masterOffset {
 			ret++
 		}
 	}
