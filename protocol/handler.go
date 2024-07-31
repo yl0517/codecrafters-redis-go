@@ -617,6 +617,7 @@ func handleXrange(request []string, s *Server) error {
 
 	resp := fmt.Sprintf("*%d\r\n", len(entries))
 	for _, entry := range entries {
+		resp += fmt.Sprintf("*2\r\n")
 		resp += ToBulkString(entry.id)
 		resp += fmt.Sprintf("*%d\r\n", len(entry.kvpairs)*2)
 		for k, v := range entry.kvpairs {
