@@ -1,6 +1,10 @@
 package protocol
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
 
 // Stream represents a stream
 type Stream struct {
@@ -36,4 +40,49 @@ func NewStreamEntry(id string, kvs []string) (*StreamEntry, error) {
 		id:      id,
 		kvpairs: kvpairs,
 	}, nil
+}
+
+func validateStreamEntryID(stream *Stream, id string) (string, error) {
+	millisecondsTime, err := strconv.Atoi(id[:strings.IndexByte(id, '-')])
+	if err != nil {
+		return "", fmt.Errorf("Atoi failed: %v", err)
+	}
+	sequenceNumber, err := strconv.Atoi(id[strings.IndexByte(id, '-')+1:])
+	if err != nil {
+		return "", fmt.Errorf("Atoi failed: %v", err)
+	}
+
+	if len(stream.entries) == 0 {
+		if millisecondsTime > 0 || sequenceNumber > 0 {
+			return "", nil
+		}
+	}
+
+	if millisecondsTime == 0 && sequenceNumber == 0 {
+		return "", nil
+	}
+
+	prevID := stream.entries[len(stream.entries)-1].id
+
+	prevMillisecondsTime, err := strconv.Atoi(prevID[:strings.IndexByte(prevID, '-')])
+	if err != nil {
+		return "", fmt.Errorf("Atoi failed: %v", err)
+	}
+	prevSequenceNumber, err := strconv.Atoi(prevID[strings.IndexByte(prevID, '-')+1:])
+	if err != nil {
+		return "", fmt.Errorf("Atoi failed: %v", err)
+	}
+
+	fmt.Println(millisecondsTime, prevMillisecondsTime, sequenceNumber, prevSequenceNumber)
+
+	if millisecondsTime > prevMillisecondsTime {
+		return "", nil
+	} else if millisecondsTime == prevMillisecondsTime {
+		if sequenceNumber > prevSequenceNumber {
+			return "", nil
+		}
+
+	}
+	return "ERR The ID specified in XADD is equal or smaller than the target stream top item", nil
+
 }

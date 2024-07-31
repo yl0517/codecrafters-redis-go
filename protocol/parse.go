@@ -56,3 +56,8 @@ func ToRespArray(arr []string) string {
 func ToBulkString(s string) string {
 	return fmt.Sprintf("$%d\r\n%s\r\n", len(s), s)
 }
+
+// ToSimpleError turns a string into a RESP simple error
+func ToSimpleError(s string) string {
+	return fmt.Sprintf("-%s\r\n", s)
+}

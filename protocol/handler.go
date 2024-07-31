@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -478,6 +479,15 @@ func handleXadd(request []string, s *Server) error {
 		s.storage.streams[request[0]] = NewStream()
 	}
 	stream := s.storage.streams[request[0]]
+
+	msg, err := validateStreamEntryID(stream, request[1])
+	if err != nil {
+		return err
+	}
+	if msg != "" {
+		s.c.Write(ToSimpleError(msg))
+		return errors.New("validateStreamEntryID failed")
+	}
 
 	entry, err := NewStreamEntry(request[1], request[2:])
 	if err != nil {
