@@ -480,7 +480,26 @@ func handleXadd(request []string, s *Server) error {
 	}
 	stream := s.storage.streams[request[0]]
 
-	msg, err := validateStreamEntryID(stream, request[1])
+	id := request[1]
+	if strings.Contains(id, "*") {
+		if id == "*" {
+			// Auto Gen id
+		} else {
+			if !strings.Contains(id[strings.IndexByte(id, '-')+1:], "*") {
+				return fmt.Errorf("Invalid auto generated id request: %s", id)
+			}
+
+			// Auto Generate Seq
+			seq, err := autoGenSeqNum(stream, id)
+			if err != nil {
+				return fmt.Errorf("autoGenSeqNum failed: %v", err)
+			}
+
+			id = fmt.Sprintf("%s-%s", id[:strings.IndexByte(id, '-')], seq)
+		}
+	}
+
+	msg, err := validateStreamEntryID(stream, id)
 	if err != nil {
 		return err
 	}
@@ -489,14 +508,14 @@ func handleXadd(request []string, s *Server) error {
 		return errors.New("validateStreamEntryID failed")
 	}
 
-	entry, err := NewStreamEntry(request[1], request[2:])
+	entry, err := NewStreamEntry(id, request[2:])
 	if err != nil {
 		return fmt.Errorf("NewStreamEntry failed: %v", err)
 	}
 
 	stream.entries = append(stream.entries, entry)
 
-	err = s.c.Write(ToBulkString(request[1]))
+	err = s.c.Write(ToBulkString(id))
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
 	}

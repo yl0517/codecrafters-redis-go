@@ -86,3 +86,42 @@ func validateStreamEntryID(stream *Stream, id string) (string, error) {
 	return "ERR The ID specified in XADD is equal or smaller than the target stream top item", nil
 
 }
+
+func autoGenSeqNum(stream *Stream, id string) (string, error) {
+	millisecondsTime, err := strconv.Atoi(id[:strings.IndexByte(id, '-')])
+	if err != nil {
+		return "", fmt.Errorf("Atoi failed: %v", err)
+	}
+
+	if len(stream.entries) == 0 {
+		if millisecondsTime == 0 {
+			// default seq num is 1 when time is 0
+			return "1", nil
+		}
+
+		return "0", nil
+	}
+	prevID := stream.entries[len(stream.entries)-1].id
+
+	prevMillisecondsTime, err := strconv.Atoi(prevID[:strings.IndexByte(prevID, '-')])
+	if err != nil {
+		return "", fmt.Errorf("Atoi failed: %v", err)
+	}
+	prevSequenceNumber, err := strconv.Atoi(prevID[strings.IndexByte(prevID, '-')+1:])
+	if err != nil {
+		return "", fmt.Errorf("Atoi failed: %v", err)
+	}
+
+	if millisecondsTime > prevMillisecondsTime {
+		if millisecondsTime == 0 {
+			// default seq num is 1 when time is 0
+			return "1", nil
+		}
+
+		return "0", nil
+	}
+
+	fmt.Println("we done")
+
+	return fmt.Sprintf("%d", prevSequenceNumber+1), nil
+}
