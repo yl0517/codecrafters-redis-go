@@ -535,9 +535,19 @@ func handleXrange(request []string, s *Server) error {
 
 	key := request[0]
 
-	startMilli := 0
-	startSeq := 0
-	if strings.Contains(request[1], "-") {
+	var startIdx int
+	foundStart := false
+	var endIdx int
+	foundEnd := false
+
+	stream := s.storage.streams[key].entries
+
+	startMilli, startSeq := 0, 0
+
+	if request[1] == "-" {
+		startIdx = 0
+		foundStart = true
+	} else if strings.Contains(request[1], "-") {
 		milli, seq, err := getTimeAndSeq(request[1])
 		if err != nil {
 			return fmt.Errorf("getTimeSeq failed: %v", err)
@@ -556,7 +566,11 @@ func handleXrange(request []string, s *Server) error {
 
 	endMilli := 0
 	endSeq := 0
-	if strings.Contains(request[2], "-") {
+
+	if request[2] == "+" {
+		endIdx = len(stream)
+		foundEnd = true
+	} else if strings.Contains(request[2], "-") {
 		milli, seq, err := getTimeAndSeq(request[2])
 		if err != nil {
 			return fmt.Errorf("getTimeSeq failed: %v", err)
@@ -574,41 +588,58 @@ func handleXrange(request []string, s *Server) error {
 		endSeq = -1
 	}
 
-	stream := s.storage.streams[key].entries
+	if !foundStart || !foundEnd {
+		if endSeq < 0 {
+			for i, entry := range stream {
+				milli, seq, err := getTimeAndSeq(entry.id)
+				if err != nil {
+					return fmt.Errorf("getTimeSeq failed: %v", err)
+				}
 
-	var startIdx int
-	var endIdx int
+				if !foundStart {
+					if milli == startMilli && seq == startSeq {
+						startIdx = i
+						foundStart = true
 
-	if endSeq < 0 {
-		for i, entry := range stream {
-			milli, seq, err := getTimeAndSeq(entry.id)
-			if err != nil {
-				return fmt.Errorf("getTimeSeq failed: %v", err)
+						if foundStart && foundEnd {
+							break
+						}
+					}
+				}
+
+				if !foundEnd {
+					if milli > endMilli {
+						endIdx = i
+						foundEnd = true
+						break
+					}
+				}
 			}
+		} else {
+			for i, entry := range stream {
+				milli, seq, err := getTimeAndSeq(entry.id)
+				if err != nil {
+					return fmt.Errorf("getTimeSeq failed: %v", err)
+				}
 
-			if milli == startMilli && seq == startSeq {
-				startIdx = i
-			}
+				if !foundStart {
+					if milli == startMilli && seq == startSeq {
+						startIdx = i
+						foundStart = true
 
-			if milli > endMilli {
-				endIdx = i
-				break
-			}
-		}
-	} else {
-		for i, entry := range stream {
-			milli, seq, err := getTimeAndSeq(entry.id)
-			if err != nil {
-				return fmt.Errorf("getTimeSeq failed: %v", err)
-			}
+						if foundStart && foundEnd {
+							break
+						}
+					}
+				}
 
-			if milli == startMilli && seq == startSeq {
-				startIdx = i
-			}
-
-			if milli == endMilli && seq == endSeq {
-				endIdx = i + 1
-				break
+				if !foundEnd {
+					if milli == endMilli && seq == endSeq {
+						endIdx = i + 1
+						foundEnd = true
+						break
+					}
+				}
 			}
 		}
 	}
