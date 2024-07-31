@@ -15,11 +15,8 @@ type Server struct {
 	c       *Connection
 	opts    Opts
 	storage *Storage
-	// offset  int
 
 	// for master only
-	// slaves *Slaves
-	// wg     *sync.WaitGroup
 	mc *MasterConfig
 }
 
@@ -29,21 +26,20 @@ func NewMaster(conn *Connection, o Opts, mc *MasterConfig) *Server {
 		c:       conn,
 		opts:    o,
 		storage: storage,
-		// slaves:  list,
-		mc: mc,
+		mc:      mc,
 	}
 }
 
+// MasterConfig represents the configuration used by master
 type MasterConfig struct {
-	// storage    *Storage
 	slaves     *Slaves
 	wg         *sync.WaitGroup
 	propOffset int
 }
 
+// NewMasterConfig is the MasterConfig constructor
 func NewMasterConfig() *MasterConfig {
 	return &MasterConfig{
-		// storage:    storage,
 		slaves:     list,
 		propOffset: 0,
 	}
@@ -463,11 +459,11 @@ func handleType(request []string, s *Server) error {
 		}
 
 		return nil
-	} else {
-		err := s.c.Write("+none\r\n")
-		if err != nil {
-			return fmt.Errorf("Write failed: %v", err)
-		}
+	}
+
+	err := s.c.Write("+none\r\n")
+	if err != nil {
+		return fmt.Errorf("Write failed: %v", err)
 	}
 
 	return nil
@@ -483,7 +479,14 @@ func handleXadd(request []string, s *Server) error {
 	id := request[1]
 	if strings.Contains(id, "*") {
 		if id == "*" {
-			// Auto Gen id
+			genID, err := autoGenID(stream)
+			if err != nil {
+				return fmt.Errorf("AutoGenID failed: %v", err)
+			}
+
+			id = genID
+			s.c.Write(ToBulkString(id))
+
 		} else {
 			if !strings.Contains(id[strings.IndexByte(id, '-')+1:], "*") {
 				return fmt.Errorf("Invalid auto generated id request: %s", id)
