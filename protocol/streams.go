@@ -44,13 +44,9 @@ func NewStreamEntry(id string, kvs []string) (*StreamEntry, error) {
 }
 
 func validateStreamEntryID(stream *Stream, id string) (string, error) {
-	millisecondsTime, err := strconv.Atoi(id[:strings.IndexByte(id, '-')])
+	millisecondsTime, sequenceNumber, err := getTimeAndSeq(id)
 	if err != nil {
-		return "", fmt.Errorf("Atoi failed: %v", err)
-	}
-	sequenceNumber, err := strconv.Atoi(id[strings.IndexByte(id, '-')+1:])
-	if err != nil {
-		return "", fmt.Errorf("Atoi failed: %v", err)
+		return "", fmt.Errorf("getTimeSeq failed: %v", err)
 	}
 
 	if len(stream.entries) == 0 {
@@ -65,13 +61,9 @@ func validateStreamEntryID(stream *Stream, id string) (string, error) {
 
 	prevID := stream.entries[len(stream.entries)-1].id
 
-	prevMillisecondsTime, err := strconv.Atoi(prevID[:strings.IndexByte(prevID, '-')])
+	prevMillisecondsTime, prevSequenceNumber, err := getTimeAndSeq(prevID)
 	if err != nil {
-		return "", fmt.Errorf("Atoi failed: %v", err)
-	}
-	prevSequenceNumber, err := strconv.Atoi(prevID[strings.IndexByte(prevID, '-')+1:])
-	if err != nil {
-		return "", fmt.Errorf("Atoi failed: %v", err)
+		return "", fmt.Errorf("getTimeSeq failed: %v", err)
 	}
 
 	if millisecondsTime > prevMillisecondsTime {
@@ -102,13 +94,9 @@ func autoGenSeqNum(stream *Stream, id string) (string, error) {
 	}
 	prevID := stream.entries[len(stream.entries)-1].id
 
-	prevMillisecondsTime, err := strconv.Atoi(prevID[:strings.IndexByte(prevID, '-')])
+	prevMillisecondsTime, prevSequenceNumber, err := getTimeAndSeq(prevID)
 	if err != nil {
-		return "", fmt.Errorf("Atoi failed: %v", err)
-	}
-	prevSequenceNumber, err := strconv.Atoi(prevID[strings.IndexByte(prevID, '-')+1:])
-	if err != nil {
-		return "", fmt.Errorf("Atoi failed: %v", err)
+		return "", fmt.Errorf("getTimeSeq failed: %v", err)
 	}
 
 	if millisecondsTime > prevMillisecondsTime {
@@ -130,13 +118,9 @@ func autoGenID(stream *Stream) (string, error) {
 	if len(stream.entries) > 0 {
 		prevID := stream.entries[len(stream.entries)-1].id
 
-		prevMillisecondsTime, err := strconv.Atoi(prevID[:strings.IndexByte(prevID, '-')])
+		prevMillisecondsTime, prevSequenceNumber, err := getTimeAndSeq(prevID)
 		if err != nil {
-			return "", fmt.Errorf("Atoi failed: %v", err)
-		}
-		prevSequenceNumber, err := strconv.Atoi(prevID[strings.IndexByte(prevID, '-')+1:])
-		if err != nil {
-			return "", fmt.Errorf("Atoi failed: %v", err)
+			return "", fmt.Errorf("getTimeSeq failed: %v", err)
 		}
 
 		if millisecondsTime == int64(prevMillisecondsTime) {
@@ -145,4 +129,17 @@ func autoGenID(stream *Stream) (string, error) {
 	}
 
 	return fmt.Sprintf("%d-%d", millisecondsTime, sequenceNumber), nil
+}
+
+func getTimeAndSeq(id string) (int, int, error) {
+	millisecondsTime, err := strconv.Atoi(id[:strings.IndexByte(id, '-')])
+	if err != nil {
+		return -1, -1, fmt.Errorf("Atoi failed: %v", err)
+	}
+	sequenceNumber, err := strconv.Atoi(id[strings.IndexByte(id, '-')+1:])
+	if err != nil {
+		return -1, -1, fmt.Errorf("Atoi failed: %v", err)
+	}
+
+	return millisecondsTime, sequenceNumber, nil
 }

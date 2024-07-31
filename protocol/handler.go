@@ -178,6 +178,11 @@ func (s *Server) HandleRequest(request []string) error {
 		if err != nil {
 			return fmt.Errorf("XADD failed: %v", err)
 		}
+	case "XRANGE":
+		err := handleXrange(request[1:], s)
+		if err != nil {
+			return fmt.Errorf("XRANGE failed: %v", err)
+		}
 	default:
 		return fmt.Errorf("unknown command: %s", request[0])
 	}
@@ -519,6 +524,108 @@ func handleXadd(request []string, s *Server) error {
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
 	}
+
+	return nil
+}
+
+func handleXrange(request []string, s *Server) error {
+	if len(request) != 3 {
+		return fmt.Errorf("invalid XRANGE request: %s", request)
+	}
+
+	key := request[0]
+
+	startMilli := 0
+	startSeq := 0
+	if strings.Contains(request[1], "-") {
+		milli, seq, err := getTimeAndSeq(request[1])
+		if err != nil {
+			return fmt.Errorf("getTimeSeq failed: %v", err)
+		}
+
+		startMilli = milli
+		startSeq = seq
+	} else {
+		milli, err := strconv.Atoi(request[1])
+		if err != nil {
+			return fmt.Errorf("Atoi failed: %v", err)
+		}
+
+		startMilli = milli
+	}
+
+	endMilli := 0
+	endSeq := 0
+	if strings.Contains(request[2], "-") {
+		milli, seq, err := getTimeAndSeq(request[2])
+		if err != nil {
+			return fmt.Errorf("getTimeSeq failed: %v", err)
+		}
+
+		endMilli = milli
+		endSeq = seq
+	} else {
+		milli, err := strconv.Atoi(request[2])
+		if err != nil {
+			return fmt.Errorf("Atoi failed: %v", err)
+		}
+
+		endMilli = milli
+		endSeq = -1
+	}
+
+	stream := s.storage.streams[key].entries
+
+	var startIdx int
+	var endIdx int
+
+	if endSeq < 0 {
+		for i, entry := range stream {
+			milli, seq, err := getTimeAndSeq(entry.id)
+			if err != nil {
+				return fmt.Errorf("getTimeSeq failed: %v", err)
+			}
+
+			if milli == startMilli && seq == startSeq {
+				startIdx = i
+			}
+
+			if milli > endMilli {
+				endIdx = i
+				break
+			}
+		}
+	} else {
+		for i, entry := range stream {
+			milli, seq, err := getTimeAndSeq(entry.id)
+			if err != nil {
+				return fmt.Errorf("getTimeSeq failed: %v", err)
+			}
+
+			if milli == startMilli && seq == startSeq {
+				startIdx = i
+			}
+
+			if milli == endMilli && seq == endSeq {
+				endIdx = i + 1
+				break
+			}
+		}
+	}
+
+	entries := stream[startIdx:endIdx]
+
+	resp := fmt.Sprintf("*%d\r\n", len(entries))
+	for _, entry := range entries {
+		resp += fmt.Sprintf("*2\r\n$%d\r\n%s\r\n", len(entry.id), entry.id)
+		resp += fmt.Sprintf("*%d\r\n", len(entry.kvpairs)*2)
+		for k, v := range entry.kvpairs {
+			resp += fmt.Sprintf("$%d\r\n%s\r\n", len(k), k)
+			resp += fmt.Sprintf("$%d\r\n%s\r\n", len(v), v)
+		}
+	}
+
+	s.c.Write(resp)
 
 	return nil
 }
