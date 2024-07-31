@@ -74,8 +74,6 @@ func validateStreamEntryID(stream *Stream, id string) (string, error) {
 		return "", fmt.Errorf("Atoi failed: %v", err)
 	}
 
-	fmt.Println(millisecondsTime, prevMillisecondsTime, sequenceNumber, prevSequenceNumber)
-
 	if millisecondsTime > prevMillisecondsTime {
 		return "", nil
 	} else if millisecondsTime == prevMillisecondsTime {
@@ -121,8 +119,6 @@ func autoGenSeqNum(stream *Stream, id string) (string, error) {
 
 		return "0", nil
 	}
-
-	fmt.Println("we done")
 
 	return fmt.Sprintf("%d", prevSequenceNumber+1), nil
 }

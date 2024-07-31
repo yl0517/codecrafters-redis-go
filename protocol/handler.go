@@ -483,10 +483,7 @@ func handleXadd(request []string, s *Server) error {
 			if err != nil {
 				return fmt.Errorf("AutoGenID failed: %v", err)
 			}
-
 			id = genID
-			s.c.Write(ToBulkString(id))
-
 		} else {
 			if !strings.Contains(id[strings.IndexByte(id, '-')+1:], "*") {
 				return fmt.Errorf("Invalid auto generated id request: %s", id)
