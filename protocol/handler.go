@@ -684,11 +684,11 @@ func handleXread(request []string, s *Server) error {
 	}
 
 	streams := s.storage.streams
+	responses := make([]string, 0)
 
-	var ret string
-	for i := 0; i < len(request)/2; i++ {
+	for i := 0; i < (len(request))/2; i++ {
 		streamKey := request[i]
-		streamID := request[len(request)/2+i]
+		streamID := request[(len(request))/2+i]
 
 		reqMilli, reqSeq, err := getTimeAndSeq(streamID)
 		if err != nil {
@@ -701,7 +701,6 @@ func handleXread(request []string, s *Server) error {
 		}
 
 		startIdx := 0
-
 		for j, entry := range stream.entries {
 			milli, seq, err := getTimeAndSeq(entry.id)
 			if err != nil {
@@ -719,22 +718,27 @@ func handleXread(request []string, s *Server) error {
 			continue
 		}
 
-		resp := fmt.Sprintf("*1\r\n*2\r\n$%d\r\n%s\r\n*%d\r\n", len(streamKey), streamKey, len(entries))
+		resp := fmt.Sprintf("*2\r\n$%d\r\n%s\r\n*%d\r\n", len(streamKey), streamKey, len(entries))
 		for _, entry := range entries {
 			resp += fmt.Sprintf("*2\r\n$%d\r\n%s\r\n*%d\r\n", len(entry.id), entry.id, len(entry.kvpairs)*2)
 			for k, v := range entry.kvpairs {
 				resp += fmt.Sprintf("$%d\r\n%s\r\n$%d\r\n%s\r\n", len(k), k, len(v), v)
 			}
 		}
-
-		ret += resp
+		responses = append(responses, resp)
 	}
 
-	if ret == "" {
-		ret = "*1\r\n*2\r\n$0\r\n\r\n*0\r\n"
+	if len(responses) == 0 {
+		err := s.c.Write("*0\r\n")
+		return err
 	}
 
-	err := s.c.Write(ret)
+	finalResponse := fmt.Sprintf("*%d\r\n", len(responses))
+	for _, streamResponse := range responses {
+		finalResponse += streamResponse
+	}
+
+	err := s.c.Write(finalResponse)
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
 	}
