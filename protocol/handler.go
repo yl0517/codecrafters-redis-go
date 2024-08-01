@@ -195,7 +195,11 @@ func (s *Server) HandleRequest(request []string) error {
 				return fmt.Errorf("Atoi failed: %v", err)
 			}
 
-			err = handleXread(timeout, request[3:], s)
+			if request[3] != "streams" {
+				return fmt.Errorf("XREAD block %d be followed by \"streams\", found: %s", timeout, request[1])
+			}
+
+			err = handleXread(timeout, request[4:], s)
 			if err != nil {
 				return fmt.Errorf("XREAD failed: %v", err)
 			}
@@ -715,7 +719,7 @@ func handleXread(timeout int, request []string, s *Server) error {
 			continue
 		}
 
-		startIdx := 0
+		startIdx := -1
 		for j, entry := range stream.entries {
 			milli, seq, err := getTimeAndSeq(entry.id)
 			if err != nil {
@@ -726,6 +730,10 @@ func handleXread(timeout int, request []string, s *Server) error {
 				startIdx = j
 				break
 			}
+		}
+
+		if startIdx == -1 {
+			continue
 		}
 
 		entries := stream.entries[startIdx:]
@@ -754,6 +762,8 @@ func handleXread(timeout int, request []string, s *Server) error {
 		if err != nil {
 			return fmt.Errorf("Write failed: %v", err)
 		}
+
+		return nil
 	}
 
 	finalResponse := fmt.Sprintf("*%d\r\n", len(responses))
