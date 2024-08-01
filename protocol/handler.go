@@ -184,14 +184,25 @@ func (s *Server) HandleRequest(request []string) error {
 			return fmt.Errorf("XRANGE failed: %v", err)
 		}
 	case "XREAD":
-		if request[1] != "streams" {
+		if request[1] == "streams" {
+			err := handleXread(-1, request[2:], s)
+			if err != nil {
+				return fmt.Errorf("XREAD failed: %v", err)
+			}
+		} else if request[1] == "block" {
+			timeout, err := strconv.Atoi(request[2])
+			if err != nil {
+				return fmt.Errorf("Atoi failed: %v", err)
+			}
+
+			err = handleXread(timeout, request[3:], s)
+			if err != nil {
+				return fmt.Errorf("XREAD failed: %v", err)
+			}
+		} else {
 			return fmt.Errorf("XREAD must be followed by \"streams\", found: %s", request[1])
 		}
 
-		err := handleXread(request[2:], s)
-		if err != nil {
-			return fmt.Errorf("XREAD failed: %v", err)
-		}
 	default:
 		return fmt.Errorf("unknown command: %s", request[0])
 	}
@@ -678,7 +689,11 @@ func handleXrange(request []string, s *Server) error {
 	return nil
 }
 
-func handleXread(request []string, s *Server) error {
+func handleXread(timeout int, request []string, s *Server) error {
+	if timeout > 0 {
+		time.Sleep(time.Duration(timeout) * time.Millisecond)
+	}
+
 	if len(request) < 2 || len(request)%2 != 0 {
 		return fmt.Errorf("invalid request for XREAD: %v", request)
 	}
@@ -718,19 +733,27 @@ func handleXread(request []string, s *Server) error {
 			continue
 		}
 
-		resp := fmt.Sprintf("*2\r\n$%d\r\n%s\r\n*%d\r\n", len(streamKey), streamKey, len(entries))
+		resp := fmt.Sprintf("*2\r\n")
+		resp += ToBulkString(streamKey)
+		resp += fmt.Sprintf("*%d\r\n", len(entries))
 		for _, entry := range entries {
-			resp += fmt.Sprintf("*2\r\n$%d\r\n%s\r\n*%d\r\n", len(entry.id), entry.id, len(entry.kvpairs)*2)
+			resp += fmt.Sprintf("*2\r\n")
+			resp += ToBulkString(entry.id)
+			resp += fmt.Sprintf("*%d\r\n", len(entry.kvpairs)*2)
 			for k, v := range entry.kvpairs {
-				resp += fmt.Sprintf("$%d\r\n%s\r\n$%d\r\n%s\r\n", len(k), k, len(v), v)
+				resp += ToBulkString(k)
+				resp += ToBulkString(v)
 			}
 		}
+
 		responses = append(responses, resp)
 	}
 
 	if len(responses) == 0 {
-		err := s.c.Write("*0\r\n")
-		return err
+		err := s.c.Write("$-1\r\n")
+		if err != nil {
+			return fmt.Errorf("Write failed: %v", err)
+		}
 	}
 
 	finalResponse := fmt.Sprintf("*%d\r\n", len(responses))
