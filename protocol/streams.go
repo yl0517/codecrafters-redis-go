@@ -46,7 +46,7 @@ func NewStreamEntry(id string, kvs []string) (*StreamEntry, error) {
 func validateStreamEntryID(stream *Stream, id string) (string, error) {
 	millisecondsTime, sequenceNumber, err := getTimeAndSeq(id)
 	if err != nil {
-		return "", fmt.Errorf("getTimeSeq failed: %v", err)
+		return "", fmt.Errorf("getTimeAndSeq failed: %v", err)
 	}
 
 	if len(stream.entries) == 0 {
@@ -63,7 +63,7 @@ func validateStreamEntryID(stream *Stream, id string) (string, error) {
 
 	prevMillisecondsTime, prevSequenceNumber, err := getTimeAndSeq(prevID)
 	if err != nil {
-		return "", fmt.Errorf("getTimeSeq failed: %v", err)
+		return "", fmt.Errorf("getTimeAndSeq failed: %v", err)
 	}
 
 	if millisecondsTime > prevMillisecondsTime {
@@ -96,7 +96,7 @@ func autoGenSeqNum(stream *Stream, id string) (string, error) {
 
 	prevMillisecondsTime, prevSequenceNumber, err := getTimeAndSeq(prevID)
 	if err != nil {
-		return "", fmt.Errorf("getTimeSeq failed: %v", err)
+		return "", fmt.Errorf("getTimeAndSeq failed: %v", err)
 	}
 
 	if millisecondsTime > prevMillisecondsTime {
@@ -120,7 +120,7 @@ func autoGenID(stream *Stream) (string, error) {
 
 		prevMillisecondsTime, prevSequenceNumber, err := getTimeAndSeq(prevID)
 		if err != nil {
-			return "", fmt.Errorf("getTimeSeq failed: %v", err)
+			return "", fmt.Errorf("getTimeAndSeq failed: %v", err)
 		}
 
 		if millisecondsTime == int64(prevMillisecondsTime) {

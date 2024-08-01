@@ -183,6 +183,15 @@ func (s *Server) HandleRequest(request []string) error {
 		if err != nil {
 			return fmt.Errorf("XRANGE failed: %v", err)
 		}
+	case "XREAD":
+		if request[1] != "streams" {
+			return fmt.Errorf("XREAD must be followed by \"streams\", found: %s", request[1])
+		}
+
+		err := handleXread(request[2:], s)
+		if err != nil {
+			return fmt.Errorf("XREAD failed: %v", err)
+		}
 	default:
 		return fmt.Errorf("unknown command: %s", request[0])
 	}
@@ -509,7 +518,11 @@ func handleXadd(request []string, s *Server) error {
 		return err
 	}
 	if msg != "" {
-		s.c.Write(ToSimpleError(msg))
+		err := s.c.Write(ToSimpleError(msg))
+		if err != nil {
+			return fmt.Errorf("Write failed: %v", err)
+		}
+
 		return errors.New("validateStreamEntryID failed")
 	}
 
@@ -657,7 +670,74 @@ func handleXrange(request []string, s *Server) error {
 		}
 	}
 
-	s.c.Write(resp)
+	err := s.c.Write(resp)
+	if err != nil {
+		return fmt.Errorf("Write failed: %v", err)
+	}
+
+	return nil
+}
+
+func handleXread(request []string, s *Server) error {
+	if len(request) < 2 || len(request)%2 != 0 {
+		return fmt.Errorf("invalid request for XREAD: %v", request)
+	}
+
+	streams := s.storage.streams
+
+	var ret string
+	for i := 0; i < len(request)/2; i++ {
+		streamKey := request[i]
+		streamID := request[len(request)/2+i]
+
+		reqMilli, reqSeq, err := getTimeAndSeq(streamID)
+		if err != nil {
+			return fmt.Errorf("getTimeAndSeq failed: %v", err)
+		}
+
+		stream, exists := streams[streamKey]
+		if !exists {
+			continue
+		}
+
+		startIdx := 0
+
+		for j, entry := range stream.entries {
+			milli, seq, err := getTimeAndSeq(entry.id)
+			if err != nil {
+				return fmt.Errorf("getTimeAndSeq failed: %v", err)
+			}
+
+			if milli > reqMilli || (milli == reqMilli && seq > reqSeq) {
+				startIdx = j
+				break
+			}
+		}
+
+		entries := stream.entries[startIdx:]
+		if len(entries) == 0 {
+			continue
+		}
+
+		resp := fmt.Sprintf("*1\r\n*2\r\n$%d\r\n%s\r\n*%d\r\n", len(streamKey), streamKey, len(entries))
+		for _, entry := range entries {
+			resp += fmt.Sprintf("*2\r\n$%d\r\n%s\r\n*%d\r\n", len(entry.id), entry.id, len(entry.kvpairs)*2)
+			for k, v := range entry.kvpairs {
+				resp += fmt.Sprintf("$%d\r\n%s\r\n$%d\r\n%s\r\n", len(k), k, len(v), v)
+			}
+		}
+
+		ret += resp
+	}
+
+	if ret == "" {
+		ret = "*1\r\n*2\r\n$0\r\n\r\n*0\r\n"
+	}
+
+	err := s.c.Write(ret)
+	if err != nil {
+		return fmt.Errorf("Write failed: %v", err)
+	}
 
 	return nil
 }
