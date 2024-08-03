@@ -695,12 +695,11 @@ func handleXrange(request []string, s *Server) error {
 
 func handleXread(timeout int, request []string, s *Server) error {
 	streams := s.storage.streams
+	curr := s.storage.streams[request[0]].entries
 
 	if timeout > 0 {
 		time.Sleep(time.Duration(timeout) * time.Millisecond)
 	} else if timeout == 0 {
-		curr := s.storage.streams[request[0]].entries
-
 		for {
 			if len(curr) != len(s.storage.streams[request[0]].entries) {
 				break
@@ -717,6 +716,19 @@ func handleXread(timeout int, request []string, s *Server) error {
 	for i := 0; i < (len(request))/2; i++ {
 		streamKey := request[i]
 		streamID := request[(len(request))/2+i]
+
+		if streamID == "$" {
+			if len(curr) == len(streams[streamKey].entries) {
+				err := s.c.Write("$-1\r\n")
+				if err != nil {
+					return fmt.Errorf("Write failed: %v", err)
+				}
+
+				return nil
+			} else {
+				streamID = streams[streamKey].entries[len(streams[streamKey].entries)-1-(len(streams[streamKey].entries)-len(curr))].id
+			}
+		}
 
 		reqMilli, reqSeq, err := getTimeAndSeq(streamID)
 		if err != nil {
