@@ -694,15 +694,24 @@ func handleXrange(request []string, s *Server) error {
 }
 
 func handleXread(timeout int, request []string, s *Server) error {
+	streams := s.storage.streams
+
 	if timeout > 0 {
 		time.Sleep(time.Duration(timeout) * time.Millisecond)
+	} else if timeout == 0 {
+		curr := s.storage.streams[request[0]].entries
+
+		for {
+			if len(curr) != len(s.storage.streams[request[0]].entries) {
+				break
+			}
+		}
 	}
 
 	if len(request) < 2 || len(request)%2 != 0 {
 		return fmt.Errorf("invalid request for XREAD: %v", request)
 	}
 
-	streams := s.storage.streams
 	responses := make([]string, 0)
 
 	for i := 0; i < (len(request))/2; i++ {
