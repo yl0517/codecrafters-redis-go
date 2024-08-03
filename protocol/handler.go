@@ -207,6 +207,10 @@ func (s *Server) HandleRequest(request []string) error {
 			return fmt.Errorf("XREAD must be followed by \"streams\", found: %s", request[1])
 		}
 
+	case "INCR":
+		if err := handleIncr(request[1], s); err != nil {
+			return fmt.Errorf("INCR failed: %v", err)
+		}
 	default:
 		return fmt.Errorf("unknown command: %s", request[0])
 	}
@@ -795,6 +799,28 @@ func handleXread(timeout int, request []string, s *Server) error {
 	err := s.c.Write(finalResponse)
 	if err != nil {
 		return fmt.Errorf("Write failed: %v", err)
+	}
+
+	return nil
+}
+
+func handleIncr(key string, s *Server) error {
+	if entry, ok := s.storage.cache[key]; ok {
+		val, err := strconv.Atoi(entry.msg)
+		if err != nil {
+			return fmt.Errorf("Atoi failed: %v", err)
+		}
+
+		incremented := strconv.Itoa(val + 1)
+
+		entry.msg = incremented
+		if err := s.c.Write(fmt.Sprintf(":%s\r\n", incremented)); err != nil {
+			return fmt.Errorf("Write failed: %v", err)
+		}
+	} else {
+		req := []string{key, "1"}
+
+		handleSet(s, req)
 	}
 
 	return nil
