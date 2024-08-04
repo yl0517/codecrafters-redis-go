@@ -206,10 +206,13 @@ func (s *Server) HandleRequest(request []string) error {
 		} else {
 			return fmt.Errorf("XREAD must be followed by \"streams\", found: %s", request[1])
 		}
-
 	case "INCR":
 		if err := handleIncr(request[1], s); err != nil {
 			return fmt.Errorf("INCR failed: %v", err)
+		}
+	case "MULTI":
+		if err := handleMulti(s); err != nil {
+			return fmt.Errorf("MULTI failed: %v", err)
 		}
 	default:
 		return fmt.Errorf("unknown command: %s", request[0])
@@ -825,6 +828,14 @@ func handleIncr(key string, s *Server) error {
 		if err := s.c.Write(":1\r\n"); err != nil {
 			return fmt.Errorf("Write failed: %v", err)
 		}
+	}
+
+	return nil
+}
+
+func handleMulti(s *Server) error {
+	if err := s.c.Write("+OK\r\n"); err != nil {
+		return fmt.Errorf("Write failed: %v", err)
 	}
 
 	return nil
