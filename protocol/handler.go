@@ -729,8 +729,9 @@ func handleXread(timeout int, request []string, s *Server) error {
 				}
 
 				return nil
+			} else {
+				streamID = streams[streamKey].entries[len(streams[streamKey].entries)-1-(len(streams[streamKey].entries)-len(curr))].id
 			}
-			streamID = streams[streamKey].entries[len(streams[streamKey].entries)-1-(len(streams[streamKey].entries)-len(curr))].id
 		}
 
 		reqMilli, reqSeq, err := getTimeAndSeq(streamID)
