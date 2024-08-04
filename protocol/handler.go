@@ -818,9 +818,11 @@ func handleIncr(key string, s *Server) error {
 			return fmt.Errorf("Write failed: %v", err)
 		}
 	} else {
-		req := []string{key, "1"}
+		s.storage.cache[key] = NewEntry("1", 0)
 
-		handleSet(s, req)
+		if err := s.c.Write(":1\r\n"); err != nil {
+			return fmt.Errorf("Write failed: %v", err)
+		}
 	}
 
 	return nil
