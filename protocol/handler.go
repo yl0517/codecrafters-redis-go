@@ -729,9 +729,8 @@ func handleXread(timeout int, request []string, s *Server) error {
 				}
 
 				return nil
-			} else {
-				streamID = streams[streamKey].entries[len(streams[streamKey].entries)-1-(len(streams[streamKey].entries)-len(curr))].id
 			}
+			streamID = streams[streamKey].entries[len(streams[streamKey].entries)-1-(len(streams[streamKey].entries)-len(curr))].id
 		}
 
 		reqMilli, reqSeq, err := getTimeAndSeq(streamID)
@@ -808,7 +807,9 @@ func handleIncr(key string, s *Server) error {
 	if entry, ok := s.storage.cache[key]; ok {
 		val, err := strconv.Atoi(entry.msg)
 		if err != nil {
-			return fmt.Errorf("Atoi failed: %v", err)
+			if err := s.c.Write("-ERR value is not an integer or out of range\r\n"); err != nil {
+				return fmt.Errorf("Write failed: %v", err)
+			}
 		}
 
 		incremented := strconv.Itoa(val + 1)
