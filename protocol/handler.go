@@ -16,6 +16,7 @@ type Server struct {
 	opts    Opts
 	storage *Storage
 	queuing bool
+	queue   []string
 
 	// for master only
 	mc *MasterConfig
@@ -29,6 +30,7 @@ func NewMaster(conn *Connection, o Opts, mc *MasterConfig) *Server {
 		storage: storage,
 		mc:      mc,
 		queuing: false,
+		queue:   make([]string, 0),
 	}
 }
 
@@ -91,7 +93,16 @@ func (s *Server) HandleRequest(request []string) error {
 		return fmt.Errorf("empty request")
 	}
 
-	// var remoteAddr string
+	if strings.ToUpper(request[0]) == "EXEC" {
+		if err := handleExec(s); err != nil {
+			return fmt.Errorf("MULTI failed: %v", err)
+		}
+	}
+
+	if s.queuing == true {
+
+		return nil
+	}
 
 	switch strings.ToUpper(request[0]) {
 	case "PING":
@@ -214,10 +225,6 @@ func (s *Server) HandleRequest(request []string) error {
 		}
 	case "MULTI":
 		if err := handleMulti(s); err != nil {
-			return fmt.Errorf("MULTI failed: %v", err)
-		}
-	case "EXEC":
-		if err := handleExec(s); err != nil {
 			return fmt.Errorf("MULTI failed: %v", err)
 		}
 	default:
@@ -857,6 +864,12 @@ func handleExec(s *Server) error {
 			return fmt.Errorf("Write failed: %v", err)
 		}
 	} else {
+		if err := s.c.Write(ToRespArray(s.queue)); err != nil {
+			return fmt.Errorf("Write failed: %v", err)
+		}
+
+		fmt.Println("asdfsfs")
+
 		s.queuing = false
 	}
 
