@@ -432,7 +432,7 @@ func handleWait(request []string, master *Server) error {
 	}
 
 	if err := master.mc.slaves.Propagate("*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n"); err != nil {
-		return fmt.Errorf("Write failed: %v", err)
+		return fmt.Errorf("Propagate failed: %v", err)
 	}
 
 	master.mc.wg = &sync.WaitGroup{}
@@ -854,7 +854,7 @@ func handleIncr(key string, s *Server) error {
 }
 
 func handleMulti(s *Server) error {
-	if s.queuing == false {
+	if !s.queuing {
 		s.queuing = true
 	}
 
