@@ -16,7 +16,7 @@ type Server struct {
 	opts    Opts
 	storage *Storage
 	queuing bool
-	queue   []string
+	queue   [][]string
 
 	// for master only
 	mc *MasterConfig
@@ -30,7 +30,7 @@ func NewMaster(conn *Connection, o Opts, mc *MasterConfig) *Server {
 		storage: storage,
 		mc:      mc,
 		queuing: false,
-		queue:   make([]string, 0),
+		queue:   make([][]string, 0),
 	}
 }
 
@@ -100,6 +100,11 @@ func (s *Server) HandleRequest(request []string) error {
 	}
 
 	if s.queuing == true {
+		s.queue = append(s.queue, request)
+
+		if err := s.c.Write("+QUEUED\r\n"); err != nil {
+			return fmt.Errorf("Write failed: %v", err)
+		}
 
 		return nil
 	}
@@ -864,13 +869,21 @@ func handleExec(s *Server) error {
 			return fmt.Errorf("Write failed: %v", err)
 		}
 	} else {
-		if err := s.c.Write(ToRespArray(s.queue)); err != nil {
-			return fmt.Errorf("Write failed: %v", err)
+		if len(s.queue) == 0 {
+			if s.queuing != false {
+				s.queuing = false
+			}
+
+			if err := s.c.Write("*0\r\n"); err != nil {
+				return fmt.Errorf("Write failed: %v", err)
+			}
+		} else {
+			s.queuing = false
+
+			for _, request := range s.queue {
+				s.HandleRequest(request)
+			}
 		}
-
-		fmt.Println("asdfsfs")
-
-		s.queuing = false
 	}
 
 	return nil
