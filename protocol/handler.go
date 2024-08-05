@@ -15,6 +15,7 @@ type Server struct {
 	c       *Connection
 	opts    Opts
 	storage *Storage
+	queuing bool
 
 	// for master only
 	mc *MasterConfig
@@ -27,6 +28,7 @@ func NewMaster(conn *Connection, o Opts, mc *MasterConfig) *Server {
 		opts:    o,
 		storage: storage,
 		mc:      mc,
+		queuing: false,
 	}
 }
 
@@ -212,6 +214,10 @@ func (s *Server) HandleRequest(request []string) error {
 		}
 	case "MULTI":
 		if err := handleMulti(s); err != nil {
+			return fmt.Errorf("MULTI failed: %v", err)
+		}
+	case "EXEC":
+		if err := handleExec(s); err != nil {
 			return fmt.Errorf("MULTI failed: %v", err)
 		}
 	default:
@@ -834,8 +840,24 @@ func handleIncr(key string, s *Server) error {
 }
 
 func handleMulti(s *Server) error {
+	if s.queuing == false {
+		s.queuing = true
+	}
+
 	if err := s.c.Write("+OK\r\n"); err != nil {
 		return fmt.Errorf("Write failed: %v", err)
+	}
+
+	return nil
+}
+
+func handleExec(s *Server) error {
+	if s.queuing == false {
+		if err := s.c.Write("-ERR EXEC without MULTI\r\n"); err != nil {
+			return fmt.Errorf("Write failed: %v", err)
+		}
+	} else {
+		s.queuing = false
 	}
 
 	return nil
