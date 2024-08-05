@@ -97,6 +97,8 @@ func (s *Server) HandleRequest(request []string) error {
 		if err := handleExec(s); err != nil {
 			return fmt.Errorf("MULTI failed: %v", err)
 		}
+
+		return nil
 	}
 
 	if s.queuing == true {
