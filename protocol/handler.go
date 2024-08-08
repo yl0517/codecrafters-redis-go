@@ -166,10 +166,6 @@ func handleExec(s *Server) error {
 					continue
 				}
 
-				if err != nil {
-					return fmt.Errorf("ExtractString failed: %v", err)
-				}
-
 				responses = append(responses, response)
 			}
 
