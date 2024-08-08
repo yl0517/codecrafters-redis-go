@@ -94,14 +94,14 @@ func (s *Server) HandleRequest(request []string) error {
 		if err := handleExec(s); err != nil {
 			return fmt.Errorf("MULTI failed: %v", err)
 		}
-
-		return nil
 	case "MULTI":
 		if err := handleMulti(s); err != nil {
 			return fmt.Errorf("MULTI failed: %v", err)
 		}
-
-		return nil
+	case "DISCARD":
+		if err := handleDiscard(s); err != nil {
+			return fmt.Errorf("MULTI failed: %v", err)
+		}
 	default:
 		if s.queuing {
 			s.queue = append(s.queue, request)
@@ -119,9 +119,9 @@ func (s *Server) HandleRequest(request []string) error {
 		}
 
 		s.c.Write(response)
-
-		return nil
 	}
+
+	return nil
 }
 
 func handleMulti(s *Server) error {
@@ -169,12 +169,31 @@ func handleExec(s *Server) error {
 				responses = append(responses, response)
 			}
 
+			s.queue = [][]string{}
+
 			respArr := fmt.Sprintf("*%d\r\n", len(responses))
 			for _, s := range responses {
 				respArr += s
 			}
 
 			s.c.Write(respArr)
+		}
+	}
+
+	return nil
+}
+
+func handleDiscard(s *Server) error {
+	if s.queuing {
+		s.queuing = false
+		s.queue = [][]string{}
+
+		if err := s.c.Write("+OK\r\n"); err != nil {
+			return fmt.Errorf("Write failed: %v", err)
+		}
+	} else {
+		if err := s.c.Write("-ERR DISCARD without MULTI\r\n"); err != nil {
+			return fmt.Errorf("Write failed: %v", err)
 		}
 	}
 
