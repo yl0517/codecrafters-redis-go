@@ -403,7 +403,7 @@ func handleInfo(arg string, s *Server) (string, error) {
 	return fmt.Sprintf("$%d\r\n%s\r\n", len(ret), ret), nil
 }
 
-func handleReplconf(server *Server, request []string) (string, error) {
+func handleReplconf(s *Server, request []string) (string, error) {
 	switch request[0] {
 	case "ACK":
 		// This logic is ran by master
@@ -414,18 +414,18 @@ func handleReplconf(server *Server, request []string) (string, error) {
 
 		fmt.Println("ack = ", ack)
 
-		if err := server.mc.slaves.Ack(server.c.conn.RemoteAddr(), ack); err != nil {
+		if err := s.mc.slaves.Ack(s.c.conn.RemoteAddr(), ack); err != nil {
 			return "", fmt.Errorf("ack slave response filed: %w", err)
 		}
 
-		if server.mc.wg != nil {
-			server.mc.wg.Done()
+		if s.mc.wg != nil {
+			s.mc.wg.Done()
 		}
 	case "GETACK":
 		// This logic is ran by slave
-		curr := server.c.offset
+		curr := s.c.offset
 		ret := fmt.Sprintf("*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$%d\r\n%d\r\n", len(strconv.Itoa(curr)), curr)
-		server.c.offset += 37
+		s.c.offset += 37
 
 		return ret, nil
 	default:
@@ -597,6 +597,10 @@ func handleXadd(request []string, s *Server) (string, error) {
 
 	stream.entries = append(stream.entries, entry)
 
+	if s.mc.wg != nil {
+		s.mc.wg.Done()
+	}
+
 	return ToBulkString(id), nil
 }
 
@@ -734,15 +738,23 @@ func handleXrange(request []string, s *Server) (string, error) {
 
 func handleXread(timeout int, request []string, s *Server) (string, error) {
 	streams := s.storage.streams
-	curr := s.storage.streams[request[0]].entries
+	curr := make([]*StreamEntry, len(s.storage.streams[request[0]].entries))
+	copy(curr, s.storage.streams[request[0]].entries)
 
 	if timeout > 0 {
 		time.Sleep(time.Duration(timeout) * time.Millisecond)
 	} else if timeout == 0 {
-		for {
-			if len(curr) != len(s.storage.streams[request[0]].entries) {
-				break
-			}
+		s.mc.wg = &sync.WaitGroup{}
+		s.mc.wg.Add(1)
+
+		ch := make(chan struct{})
+		go func() {
+			defer close(ch)
+			s.mc.wg.Wait()
+		}()
+
+		select {
+		case <-ch:
 		}
 	}
 
@@ -759,7 +771,6 @@ func handleXread(timeout int, request []string, s *Server) (string, error) {
 		if streamID == "$" {
 			if len(curr) == len(streams[streamKey].entries) {
 				return "$-1\r\n", nil
-
 			}
 			streamID = streams[streamKey].entries[len(streams[streamKey].entries)-1-(len(streams[streamKey].entries)-len(curr))].id
 		}
