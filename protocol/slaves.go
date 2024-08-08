@@ -55,7 +55,6 @@ func (s *Slaves) Propagate(cmd string) error {
 		}
 	}
 
-	fmt.Println("sent getack to slaves")
 	return nil
 }
 

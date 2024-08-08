@@ -56,7 +56,7 @@ func validateStreamEntryID(stream *Stream, id string) (string, error) {
 	}
 
 	if millisecondsTime == 0 && sequenceNumber == 0 {
-		return "ERR The ID specified in XADD must be greater than 0-0", nil
+		return "-ERR The ID specified in XADD must be greater than 0-0\r\n", nil
 	}
 
 	prevID := stream.entries[len(stream.entries)-1].id
@@ -74,7 +74,7 @@ func validateStreamEntryID(stream *Stream, id string) (string, error) {
 		}
 
 	}
-	return "ERR The ID specified in XADD is equal or smaller than the target stream top item", nil
+	return "-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n", nil
 
 }
 

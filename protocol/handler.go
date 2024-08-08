@@ -61,7 +61,7 @@ func NewSlave(conn *Connection) *Server {
 func (s *Server) Handle() {
 	defer s.c.Close()
 
-	processRDB(s)
+	s.processRDB()
 
 	for {
 		o, request, err := s.Read()
@@ -83,185 +83,248 @@ func (s *Server) Handle() {
 	}
 }
 
-var (
-	waitLock = sync.Mutex{}
-)
-
 // HandleRequest responds to the request recieved.
 func (s *Server) HandleRequest(request []string) error {
 	if len(request) == 0 {
 		return fmt.Errorf("empty request")
 	}
 
-	if strings.ToUpper(request[0]) == "EXEC" {
+	switch strings.ToUpper(request[0]) {
+	case "EXEC":
 		if err := handleExec(s); err != nil {
 			return fmt.Errorf("MULTI failed: %v", err)
 		}
 
 		return nil
-	}
-
-	if s.queuing == true {
-		s.queue = append(s.queue, request)
-
-		if err := s.c.Write("+QUEUED\r\n"); err != nil {
-			return fmt.Errorf("Write failed: %v", err)
-		}
-
-		return nil
-	}
-
-	switch strings.ToUpper(request[0]) {
-	case "PING":
-		err := handlePing(s)
-		if err != nil {
-			return fmt.Errorf("PING failed: %v", err)
-		}
-	case "ECHO":
-		if len(request) != 2 {
-			return fmt.Errorf("ECHO expects 1 argument")
-		}
-		err := handleEcho(s, request[1])
-		if err != nil {
-			return fmt.Errorf("ECHO failed: %v", err)
-		}
-	case "SET":
-		err := handleSet(s, request[1:])
-		if err != nil {
-			return fmt.Errorf("SET failed: %v", err)
-		}
-
-		if s.opts.Role == "master" {
-			err := handlePropagation(s, request)
-			if err != nil {
-				return fmt.Errorf("Propagation failed: %v", err)
-			}
-		}
-	case "GET":
-		if len(request) != 2 {
-			return fmt.Errorf("GET expects 1 argument")
-		}
-		err := handleGet(s, request[1])
-		if err != nil {
-			return fmt.Errorf("GET failed: %v", err)
-		}
-	case "INFO":
-		if len(request) != 2 {
-			return fmt.Errorf("INFO expects 1 argument")
-		}
-		err := handleInfo(request[1], s)
-		if err != nil {
-			return fmt.Errorf("INFO failed: %v", err)
-		}
-	case "REPLCONF":
-		err := handleReplconf(s, request[1:])
-		if err != nil {
-			return fmt.Errorf("REPLCONF failed: %v", err)
-		}
-	case "PSYNC":
-		err := handlePsync(request[1:], s)
-		if err != nil {
-			return fmt.Errorf("PSYNC failed: %v", err)
-		}
-
-		s.mc.slaves.AddSlave(s.c.conn.RemoteAddr(), s.c)
-	case "WAIT":
-		waitLock.Lock()
-		err := handleWait(request[1:], s)
-		waitLock.Unlock()
-		if err != nil {
-			return fmt.Errorf("WAIT failed: %v", err)
-		}
-	case "CONFIG":
-		if request[1] == "GET" {
-			err := handleConfigGet(request[2:], s)
-			if err != nil {
-				return fmt.Errorf("CONFIG GET failed: %v", err)
-			}
-		} else {
-			return fmt.Errorf("Invalid CONFIG command: %s", request[1])
-		}
-	case "KEYS":
-		if request[1] == "*" {
-			err := handleKeys(s)
-			if err != nil {
-				return fmt.Errorf("KEYS failed: %v", err)
-			}
-		}
-	case "TYPE":
-		err := handleType(request[1:], s)
-		if err != nil {
-			return fmt.Errorf("TYPE failed: %v", err)
-		}
-	case "XADD":
-		err := handleXadd(request[1:], s)
-		if err != nil {
-			return fmt.Errorf("XADD failed: %v", err)
-		}
-	case "XRANGE":
-		err := handleXrange(request[1:], s)
-		if err != nil {
-			return fmt.Errorf("XRANGE failed: %v", err)
-		}
-	case "XREAD":
-		if request[1] == "streams" {
-			err := handleXread(-1, request[2:], s)
-			if err != nil {
-				return fmt.Errorf("XREAD failed: %v", err)
-			}
-		} else if request[1] == "block" {
-			timeout, err := strconv.Atoi(request[2])
-			if err != nil {
-				return fmt.Errorf("Atoi failed: %v", err)
-			}
-
-			if request[3] != "streams" {
-				return fmt.Errorf("XREAD block %d be followed by \"streams\", found: %s", timeout, request[1])
-			}
-
-			err = handleXread(timeout, request[4:], s)
-			if err != nil {
-				return fmt.Errorf("XREAD failed: %v", err)
-			}
-		} else {
-			return fmt.Errorf("XREAD must be followed by \"streams\", found: %s", request[1])
-		}
-	case "INCR":
-		if err := handleIncr(request[1], s); err != nil {
-			return fmt.Errorf("INCR failed: %v", err)
-		}
 	case "MULTI":
 		if err := handleMulti(s); err != nil {
 			return fmt.Errorf("MULTI failed: %v", err)
 		}
-	default:
-		return fmt.Errorf("unknown command: %s", request[0])
-	}
 
-	return nil
+		return nil
+	default:
+		if s.queuing {
+			s.queue = append(s.queue, request)
+
+			if err := s.c.Write("+QUEUED\r\n"); err != nil {
+				return fmt.Errorf("Write failed: %v", err)
+			}
+
+			return nil
+		}
+
+		response, err := s.processRequest(request)
+		if err != nil {
+			return fmt.Errorf("processRequest failed: %v", err)
+		}
+
+		s.c.Write(response)
+
+		return nil
+	}
 }
 
-func handleEcho(s *Server, message string) error {
-	err := s.c.Write(fmt.Sprintf("$%d\r\n%s\r\n", len(message), message))
-	if err != nil {
+func handleMulti(s *Server) error {
+	if !s.queuing {
+		s.queuing = true
+	} else {
+		return errors.New("Multi Already Called")
+	}
+
+	if err := s.c.Write("+OK\r\n"); err != nil {
 		return fmt.Errorf("Write failed: %v", err)
 	}
 
 	return nil
 }
 
-func handlePing(s *Server) error {
-	if s.opts.Role == "master" {
-		err := s.c.Write("+PONG\r\n")
-		if err != nil {
+func handleExec(s *Server) error {
+	if !s.queuing {
+		if err := s.c.Write("-ERR EXEC without MULTI\r\n"); err != nil {
 			return fmt.Errorf("Write failed: %v", err)
+		}
+	} else {
+		if len(s.queue) == 0 {
+			if s.queuing != false {
+				s.queuing = false
+			}
+
+			if err := s.c.Write("*0\r\n"); err != nil {
+				return fmt.Errorf("Write failed: %v", err)
+			}
+		} else {
+			s.queuing = false
+			responses := []string{}
+
+			for _, request := range s.queue {
+				response, err := s.processRequest(request)
+				if err != nil {
+					return fmt.Errorf("processRequest failed: %v", err)
+				}
+
+				if response == "" {
+					continue
+				}
+
+				if err != nil {
+					return fmt.Errorf("ExtractString failed: %v", err)
+				}
+
+				responses = append(responses, response)
+			}
+
+			s.c.Write(ToExecRespArray(responses))
 		}
 	}
 
 	return nil
 }
 
-func handleSet(s *Server, request []string) error {
+var (
+	waitLock = sync.Mutex{}
+)
+
+func (s *Server) processRequest(request []string) (string, error) {
+	var response string
+	var err error
+
+	switch strings.ToUpper(request[0]) {
+	case "PING":
+		response, err = handlePing(s)
+		if err != nil {
+			return "", fmt.Errorf("PING failed: %v", err)
+		}
+	case "ECHO":
+		if len(request) != 2 {
+			return "", fmt.Errorf("ECHO expects 1 argument")
+		}
+		response = handleEcho(request[1])
+	case "SET":
+		response, err = handleSet(s, request[1:])
+		if err != nil {
+			return "", fmt.Errorf("SET failed: %v", err)
+		}
+
+		if s.opts.Role == "master" {
+			err := handlePropagation(s, request)
+			if err != nil {
+				return "", fmt.Errorf("Propagation failed: %v", err)
+			}
+		}
+	case "GET":
+		if len(request) != 2 {
+			return "", fmt.Errorf("GET expects 1 argument")
+		}
+		response, err = handleGet(s, request[1])
+		if err != nil {
+			return "", fmt.Errorf("GET failed: %v", err)
+		}
+	case "INFO":
+		if len(request) != 2 {
+			return "", fmt.Errorf("INFO expects 1 argument")
+		}
+		response, err = handleInfo(request[1], s)
+		if err != nil {
+			return "", fmt.Errorf("INFO failed: %v", err)
+		}
+	case "REPLCONF":
+		response, err = handleReplconf(s, request[1:])
+		if err != nil {
+			return "", fmt.Errorf("REPLCONF failed: %v", err)
+		}
+	case "PSYNC":
+		response, err = handlePsync(request[1:], s)
+		if err != nil {
+			return "", fmt.Errorf("PSYNC failed: %v", err)
+		}
+
+		s.mc.slaves.AddSlave(s.c.conn.RemoteAddr(), s.c)
+	case "WAIT":
+		waitLock.Lock()
+		response, err = handleWait(request[1:], s)
+		waitLock.Unlock()
+		if err != nil {
+			return "", fmt.Errorf("WAIT failed: %v", err)
+		}
+	case "CONFIG":
+		if request[1] == "GET" {
+			response, err = handleConfigGet(request[2:], s)
+			if err != nil {
+				return "", fmt.Errorf("CONFIG GET failed: %v", err)
+			}
+		} else {
+			return "", fmt.Errorf("Invalid CONFIG command: %s", request[1])
+		}
+	case "KEYS":
+		if request[1] == "*" {
+			response, err = handleKeys(s)
+			if err != nil {
+				return "", fmt.Errorf("KEYS failed: %v", err)
+			}
+		}
+	case "TYPE":
+		response, err = handleType(request[1:], s)
+		if err != nil {
+			return "", fmt.Errorf("TYPE failed: %v", err)
+		}
+	case "XADD":
+		response, err = handleXadd(request[1:], s)
+		if err != nil {
+			return "", fmt.Errorf("XADD failed: %v", err)
+		}
+	case "XRANGE":
+		response, err = handleXrange(request[1:], s)
+		if err != nil {
+			return "", fmt.Errorf("XRANGE failed: %v", err)
+		}
+	case "XREAD":
+		if request[1] == "streams" {
+			response, err = handleXread(-1, request[2:], s)
+			if err != nil {
+				return "", fmt.Errorf("XREAD failed: %v", err)
+			}
+		} else if request[1] == "block" {
+			timeout, err := strconv.Atoi(request[2])
+			if err != nil {
+				return "", fmt.Errorf("Atoi failed: %v", err)
+			}
+
+			if request[3] != "streams" {
+				return "", fmt.Errorf("XREAD block %d be followed by \"streams\", found: %s", timeout, request[1])
+			}
+
+			response, err = handleXread(timeout, request[4:], s)
+			if err != nil {
+				return "", fmt.Errorf("XREAD failed: %v", err)
+			}
+		} else {
+			return "", fmt.Errorf("XREAD must be followed by \"streams\", found: %s", request[1])
+		}
+	case "INCR":
+		response, err = handleIncr(request[1], s)
+		if err != nil {
+			return "", fmt.Errorf("INCR failed: %v", err)
+		}
+	default:
+		return "", fmt.Errorf("unknown command: %s", request[0])
+	}
+
+	return response, nil
+}
+
+func handlePing(s *Server) (string, error) {
+	if s.opts.Role == "master" {
+		return "+PONG\r\n", nil
+	}
+
+	return "", fmt.Errorf("temp: %s", "temp")
+}
+
+func handleEcho(message string) string {
+	return fmt.Sprintf("$%d\r\n%s\r\n", len(message), message)
+}
+
+func handleSet(s *Server, request []string) (string, error) {
 	key := request[0]
 	value := request[1]
 
@@ -269,7 +332,7 @@ func handleSet(s *Server, request []string) error {
 	if len(request) == 4 {
 		expireAfter, err := strconv.ParseInt(request[3], 10, 64)
 		if err != nil {
-			return fmt.Errorf("Atoi failed: %v", err)
+			return "", fmt.Errorf("Atoi failed: %v", err)
 		}
 		expireAt = time.Now().UnixMilli() + expireAfter
 	}
@@ -277,80 +340,62 @@ func handleSet(s *Server, request []string) error {
 	s.storage.cache[key] = NewEntry(value, expireAt)
 
 	if s.opts.Role == "master" {
-		err := s.c.Write("+OK\r\n")
-		if err != nil {
-			return fmt.Errorf("Write failed: %v", err)
-		}
+		return "+OK\r\n", nil
 	}
 
-	return nil
+	return "", nil
 }
 
-func handleGet(s *Server, key string) error {
+func handleGet(s *Server, key string) (string, error) {
 	now := time.Now().UnixMilli()
 
 	entry, ok := s.storage.cache[key]
 	if !ok {
-		err := s.c.Write("$-1\r\n")
-		if err != nil {
-			return fmt.Errorf("Write failed: %v", err)
-		}
-		return nil
+		return "$-1\r\n", nil
 	}
 
 	if entry.expireAt != 0 && now > entry.expireAt {
-		err := s.c.Write("$-1\r\n")
-		if err != nil {
-			return fmt.Errorf("Write failed: %v", err)
-		}
 		delete(s.storage.cache, key)
-		return nil
+		return "$-1\r\n", nil
 	}
 
-	err := s.c.Write(fmt.Sprintf("$%d\r\n%s\r\n", len(entry.msg), entry.msg))
-	if err != nil {
-		return fmt.Errorf("Write failed: %v", err)
-	}
-
-	return nil
+	return fmt.Sprintf("$%d\r\n%s\r\n", len(entry.msg), entry.msg), nil
 }
 
-func handleInfo(arg string, server *Server) error {
-	var s string
+func handleInfo(arg string, s *Server) (string, error) {
+	var ret string
 
 	if arg == "replication" {
-		s += "# Replication\r\n"
-		if server.opts.Role == "slave" {
-			s += "role:slave\r\n"
+		ret += "# Replication\r\n"
+		if s.opts.Role == "slave" {
+			ret += "role:slave\r\n"
 		} else {
-			s += "role:master\r\n"
+			ret += "role:master\r\n"
 		}
 
-		s += fmt.Sprintf("master_replid:%s\r\n", server.opts.ReplID)
+		ret += fmt.Sprintf("master_replid:%s\r\n", s.opts.ReplID)
 
-		s += fmt.Sprintf("master_repl_offset:%d\r\n", server.mc.propOffset)
+		ret += fmt.Sprintf("master_repl_offset:%d\r\n", s.mc.propOffset)
+	} else {
+		return "", fmt.Errorf("temp: %s", "temp")
 	}
 
-	err := server.c.Write(fmt.Sprintf("$%d\r\n%s\r\n", len(s), s))
-	if err != nil {
-		return fmt.Errorf("Write failed: %v", err)
-	}
-	return nil
+	return fmt.Sprintf("$%d\r\n%s\r\n", len(ret), ret), nil
 }
 
-func handleReplconf(server *Server, request []string) error {
+func handleReplconf(server *Server, request []string) (string, error) {
 	switch request[0] {
 	case "ACK":
 		// This logic is ran by master
 		ack, err := strconv.Atoi(request[1])
 		if err != nil {
-			return fmt.Errorf("strconf.Atoi failed: %v", err)
+			return "", fmt.Errorf("strconf.Atoi failed: %v", err)
 		}
 
 		fmt.Println("ack = ", ack)
 
 		if err := server.mc.slaves.Ack(server.c.conn.RemoteAddr(), ack); err != nil {
-			return fmt.Errorf("ack slave response filed: %w", err)
+			return "", fmt.Errorf("ack slave response filed: %w", err)
 		}
 
 		if server.mc.wg != nil {
@@ -358,45 +403,36 @@ func handleReplconf(server *Server, request []string) error {
 		}
 	case "GETACK":
 		// This logic is ran by slave
-		err := server.c.Write(fmt.Sprintf("*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$%d\r\n%d\r\n", len(strconv.Itoa(server.c.offset)), server.c.offset))
-		if err != nil {
-			return fmt.Errorf("Write failed: %v", err)
-		}
-
-		fmt.Println("asdfadsfafafs")
-
+		curr := server.c.offset
+		ret := fmt.Sprintf("*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$%d\r\n%d\r\n", len(strconv.Itoa(curr)), curr)
 		server.c.offset += 37
+
+		return ret, nil
 	default:
-		err := server.c.Write("+OK\r\n")
-		if err != nil {
-			return fmt.Errorf("Write failed: %v", err)
-		}
+		return "+OK\r\n", nil
 	}
 
-	return nil
+	return "", nil
 }
 
-func handlePsync(request []string, server *Server) error {
-	emptyRDB, err1 := base64.StdEncoding.DecodeString("UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog==")
-	if err1 != nil {
-		return fmt.Errorf("DecodeString failed: %v", err1)
+func handlePsync(request []string, server *Server) (string, error) {
+	var ret string
+
+	emptyRDB, err := base64.StdEncoding.DecodeString("UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog==")
+	if err != nil {
+		return "", fmt.Errorf("DecodeString failed: %v", err)
 	}
 
 	if request[0] == "?" {
-		err2 := server.c.Write(fmt.Sprintf("+FULLRESYNC %s 0\r\n", server.opts.ReplID))
-		if err2 != nil {
-			return fmt.Errorf("Write failed: %v", err2)
-		}
+		ret += fmt.Sprintf("+FULLRESYNC %s 0\r\n", server.opts.ReplID)
+
 	}
 
-	err := server.c.Write(fmt.Sprintf("$%d\r\n%s", len(string(emptyRDB)), string(emptyRDB)))
-	if err != nil {
-		return fmt.Errorf("Write failed: %v", err)
-	}
+	ret += fmt.Sprintf("$%d\r\n%s", len(string(emptyRDB)), string(emptyRDB))
 
 	server.mc.slaves.AddSlave(server.c.conn.RemoteAddr(), server.c)
 
-	return nil
+	return ret, nil
 }
 
 func handlePropagation(master *Server, request []string) error {
@@ -409,30 +445,26 @@ func handlePropagation(master *Server, request []string) error {
 	return nil
 }
 
-func handleWait(request []string, master *Server) error {
+func handleWait(request []string, master *Server) (string, error) {
 	numReplicas, err := strconv.Atoi(request[0])
 	if err != nil {
-		return fmt.Errorf("Atoi failed: %v", err)
+		return "", fmt.Errorf("Atoi failed: %v", err)
 	}
 
 	t, err := strconv.Atoi(request[1])
 	if err != nil {
-		return fmt.Errorf("Atoi failed: %v", err)
+		return "", fmt.Errorf("Atoi failed: %v", err)
 	}
 
 	notAcked := master.mc.slaves.NotSyncedSlaveCount(master.mc.propOffset)
 
 	if notAcked == 0 {
-		err = master.c.Write(fmt.Sprintf(":%d\r\n", master.mc.slaves.Count()))
-		if err != nil {
-			return fmt.Errorf("Write failed: %v", err)
-		}
+		return fmt.Sprintf(":%d\r\n", master.mc.slaves.Count()), nil
 
-		return nil
 	}
 
 	if err := master.mc.slaves.Propagate("*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n"); err != nil {
-		return fmt.Errorf("Propagate failed: %v", err)
+		return "", fmt.Errorf("Propagate failed: %v", err)
 	}
 
 	master.mc.wg = &sync.WaitGroup{}
@@ -452,80 +484,55 @@ func handleWait(request []string, master *Server) error {
 	notAcked = master.mc.slaves.NotSyncedSlaveCount(master.mc.propOffset)
 
 	fmt.Printf("master.offset = %d, not acked = %d\n", master.mc.propOffset, notAcked)
-	err = master.c.Write(fmt.Sprintf(":%d\r\n", master.mc.slaves.Count()-notAcked))
-	if err != nil {
-		return fmt.Errorf("Write failed: %v", err)
-	}
 
 	master.mc.propOffset += 37
 
-	return nil
+	return fmt.Sprintf(":%d\r\n", master.mc.slaves.Count()-notAcked), nil
 }
 
-func handleConfigGet(request []string, s *Server) error {
+func handleConfigGet(request []string, s *Server) (string, error) {
 	switch request[0] {
 	case "dir":
-		s.c.Write(fmt.Sprintf("*2\r\n$3\r\ndir\r\n$%d\r\n%s\r\n", len(s.opts.Dir), s.opts.Dir))
+		return fmt.Sprintf("*2\r\n$3\r\ndir\r\n$%d\r\n%s\r\n", len(s.opts.Dir), s.opts.Dir), nil
 	case "dbfilename":
-		s.c.Write(fmt.Sprintf("*2\r\n$3\r\ndbfilename\r\n$%d\r\n%s\r\n", len(s.opts.Dbfilename), s.opts.Dbfilename))
+		return fmt.Sprintf("*2\r\n$3\r\ndbfilename\r\n$%d\r\n%s\r\n", len(s.opts.Dbfilename), s.opts.Dbfilename), nil
 	default:
-		return fmt.Errorf("Invalid config get param: %v", request[0])
+		return "", fmt.Errorf("Invalid config get param: %v", request[0])
 	}
-
-	return nil
 }
 
-func handleKeys(s *Server) error {
+func handleKeys(s *Server) (string, error) {
 	var keys []string
 	for k := range s.storage.cache {
 		fmt.Printf("Found key: %s\n", k)
 		keys = append(keys, k)
 	}
 
-	err := s.c.Write(ToRespArray(keys))
-	if err != nil {
-		return fmt.Errorf("Write failed: %v", err)
-	}
-
-	return nil
+	return ToRespArray(keys), nil
 }
 
-func handleType(request []string, s *Server) error {
+func handleType(request []string, s *Server) (string, error) {
 	if len(request) > 1 {
-		return fmt.Errorf("Invalid key in type command: %s", request)
+		return "", fmt.Errorf("Invalid key in type command: %s", request)
 	}
 
 	fmt.Println(request[0])
 
 	_, ok := s.storage.streams[request[0]]
 	if ok {
-		err := s.c.Write("+stream\r\n")
-		if err != nil {
-			return fmt.Errorf("Write failed: %v", err)
-		}
+		return "+stream\r\n", nil
 
-		return nil
 	}
 
 	_, ok = s.storage.cache[request[0]]
 	if ok {
-		err := s.c.Write("+string\r\n")
-		if err != nil {
-			return fmt.Errorf("Write failed: %v", err)
-		}
-
-		return nil
+		return "+string\r\n", nil
 	}
 
-	err := s.c.Write("+none\r\n")
-	if err != nil {
-		return fmt.Errorf("Write failed: %v", err)
-	}
-
-	return nil
+	return "+none\r\n", nil
 }
 
-func handleXadd(request []string, s *Server) error {
+func handleXadd(request []string, s *Server) (string, error) {
 	_, ok := s.storage.streams[request[0]]
 	if !ok {
 		s.storage.streams[request[0]] = NewStream()
@@ -537,18 +544,18 @@ func handleXadd(request []string, s *Server) error {
 		if id == "*" {
 			genID, err := autoGenID(stream)
 			if err != nil {
-				return fmt.Errorf("AutoGenID failed: %v", err)
+				return "", fmt.Errorf("AutoGenID failed: %v", err)
 			}
 			id = genID
 		} else {
 			if !strings.Contains(id[strings.IndexByte(id, '-')+1:], "*") {
-				return fmt.Errorf("Invalid auto generated id request: %s", id)
+				return "", fmt.Errorf("Invalid auto generated id request: %s", id)
 			}
 
 			// Auto Generate Seq
 			seq, err := autoGenSeqNum(stream, id)
 			if err != nil {
-				return fmt.Errorf("autoGenSeqNum failed: %v", err)
+				return "", fmt.Errorf("autoGenSeqNum failed: %v", err)
 			}
 
 			id = fmt.Sprintf("%s-%s", id[:strings.IndexByte(id, '-')], seq)
@@ -557,35 +564,25 @@ func handleXadd(request []string, s *Server) error {
 
 	msg, err := validateStreamEntryID(stream, id)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if msg != "" {
-		err := s.c.Write(ToSimpleError(msg))
-		if err != nil {
-			return fmt.Errorf("Write failed: %v", err)
-		}
-
-		return errors.New("validateStreamEntryID failed")
+		return msg, nil
 	}
 
 	entry, err := NewStreamEntry(id, request[2:])
 	if err != nil {
-		return fmt.Errorf("NewStreamEntry failed: %v", err)
+		return "", fmt.Errorf("NewStreamEntry failed: %v", err)
 	}
 
 	stream.entries = append(stream.entries, entry)
 
-	err = s.c.Write(ToBulkString(id))
-	if err != nil {
-		return fmt.Errorf("Write failed: %v", err)
-	}
-
-	return nil
+	return ToBulkString(id), nil
 }
 
-func handleXrange(request []string, s *Server) error {
+func handleXrange(request []string, s *Server) (string, error) {
 	if len(request) != 3 {
-		return fmt.Errorf("invalid XRANGE request: %s", request)
+		return "", fmt.Errorf("invalid XRANGE request: %s", request)
 	}
 
 	key := request[0]
@@ -605,7 +602,7 @@ func handleXrange(request []string, s *Server) error {
 	} else if strings.Contains(request[1], "-") {
 		milli, seq, err := getTimeAndSeq(request[1])
 		if err != nil {
-			return fmt.Errorf("getTimeSeq failed: %v", err)
+			return "", fmt.Errorf("getTimeSeq failed: %v", err)
 		}
 
 		startMilli = milli
@@ -613,7 +610,7 @@ func handleXrange(request []string, s *Server) error {
 	} else {
 		milli, err := strconv.Atoi(request[1])
 		if err != nil {
-			return fmt.Errorf("Atoi failed: %v", err)
+			return "", fmt.Errorf("Atoi failed: %v", err)
 		}
 
 		startMilli = milli
@@ -628,7 +625,7 @@ func handleXrange(request []string, s *Server) error {
 	} else if strings.Contains(request[2], "-") {
 		milli, seq, err := getTimeAndSeq(request[2])
 		if err != nil {
-			return fmt.Errorf("getTimeSeq failed: %v", err)
+			return "", fmt.Errorf("getTimeSeq failed: %v", err)
 		}
 
 		endMilli = milli
@@ -636,7 +633,7 @@ func handleXrange(request []string, s *Server) error {
 	} else {
 		milli, err := strconv.Atoi(request[2])
 		if err != nil {
-			return fmt.Errorf("Atoi failed: %v", err)
+			return "", fmt.Errorf("Atoi failed: %v", err)
 		}
 
 		endMilli = milli
@@ -648,7 +645,7 @@ func handleXrange(request []string, s *Server) error {
 			for i, entry := range stream {
 				milli, seq, err := getTimeAndSeq(entry.id)
 				if err != nil {
-					return fmt.Errorf("getTimeSeq failed: %v", err)
+					return "", fmt.Errorf("getTimeSeq failed: %v", err)
 				}
 
 				if !foundStart {
@@ -674,7 +671,7 @@ func handleXrange(request []string, s *Server) error {
 			for i, entry := range stream {
 				milli, seq, err := getTimeAndSeq(entry.id)
 				if err != nil {
-					return fmt.Errorf("getTimeSeq failed: %v", err)
+					return "", fmt.Errorf("getTimeSeq failed: %v", err)
 				}
 
 				if !foundStart {
@@ -712,15 +709,10 @@ func handleXrange(request []string, s *Server) error {
 		}
 	}
 
-	err := s.c.Write(resp)
-	if err != nil {
-		return fmt.Errorf("Write failed: %v", err)
-	}
-
-	return nil
+	return resp, nil
 }
 
-func handleXread(timeout int, request []string, s *Server) error {
+func handleXread(timeout int, request []string, s *Server) (string, error) {
 	streams := s.storage.streams
 	curr := s.storage.streams[request[0]].entries
 
@@ -735,7 +727,7 @@ func handleXread(timeout int, request []string, s *Server) error {
 	}
 
 	if len(request) < 2 || len(request)%2 != 0 {
-		return fmt.Errorf("invalid request for XREAD: %v", request)
+		return "", fmt.Errorf("invalid request for XREAD: %v", request)
 	}
 
 	responses := make([]string, 0)
@@ -746,19 +738,15 @@ func handleXread(timeout int, request []string, s *Server) error {
 
 		if streamID == "$" {
 			if len(curr) == len(streams[streamKey].entries) {
-				err := s.c.Write("$-1\r\n")
-				if err != nil {
-					return fmt.Errorf("Write failed: %v", err)
-				}
+				return "$-1\r\n", nil
 
-				return nil
 			}
 			streamID = streams[streamKey].entries[len(streams[streamKey].entries)-1-(len(streams[streamKey].entries)-len(curr))].id
 		}
 
 		reqMilli, reqSeq, err := getTimeAndSeq(streamID)
 		if err != nil {
-			return fmt.Errorf("getTimeAndSeq failed: %v", err)
+			return "", fmt.Errorf("getTimeAndSeq failed: %v", err)
 		}
 
 		stream, exists := streams[streamKey]
@@ -770,7 +758,7 @@ func handleXread(timeout int, request []string, s *Server) error {
 		for j, entry := range stream.entries {
 			milli, seq, err := getTimeAndSeq(entry.id)
 			if err != nil {
-				return fmt.Errorf("getTimeAndSeq failed: %v", err)
+				return "", fmt.Errorf("getTimeAndSeq failed: %v", err)
 			}
 
 			if milli > reqMilli || (milli == reqMilli && seq > reqSeq) {
@@ -805,12 +793,7 @@ func handleXread(timeout int, request []string, s *Server) error {
 	}
 
 	if len(responses) == 0 {
-		err := s.c.Write("$-1\r\n")
-		if err != nil {
-			return fmt.Errorf("Write failed: %v", err)
-		}
-
-		return nil
+		return "$-1\r\n", nil
 	}
 
 	finalResponse := fmt.Sprintf("*%d\r\n", len(responses))
@@ -818,75 +801,22 @@ func handleXread(timeout int, request []string, s *Server) error {
 		finalResponse += streamResponse
 	}
 
-	err := s.c.Write(finalResponse)
-	if err != nil {
-		return fmt.Errorf("Write failed: %v", err)
-	}
-
-	return nil
+	return finalResponse, nil
 }
 
-func handleIncr(key string, s *Server) error {
+func handleIncr(key string, s *Server) (string, error) {
 	if entry, ok := s.storage.cache[key]; ok {
 		val, err := strconv.Atoi(entry.msg)
 		if err != nil {
-			if err := s.c.Write("-ERR value is not an integer or out of range\r\n"); err != nil {
-				return fmt.Errorf("Write failed: %v", err)
-			}
-			return fmt.Errorf("Atoi failed: %v", err)
+			return "-ERR value is not an integer or out of range\r\n", nil
 		}
 
 		incremented := strconv.Itoa(val + 1)
 
 		entry.msg = incremented
-		if err := s.c.Write(fmt.Sprintf(":%s\r\n", incremented)); err != nil {
-			return fmt.Errorf("Write failed: %v", err)
-		}
-	} else {
-		s.storage.cache[key] = NewEntry("1", 0)
-
-		if err := s.c.Write(":1\r\n"); err != nil {
-			return fmt.Errorf("Write failed: %v", err)
-		}
+		return fmt.Sprintf(":%s\r\n", incremented), nil
 	}
+	s.storage.cache[key] = NewEntry("1", 0)
 
-	return nil
-}
-
-func handleMulti(s *Server) error {
-	if !s.queuing {
-		s.queuing = true
-	}
-
-	if err := s.c.Write("+OK\r\n"); err != nil {
-		return fmt.Errorf("Write failed: %v", err)
-	}
-
-	return nil
-}
-
-func handleExec(s *Server) error {
-	if s.queuing == false {
-		if err := s.c.Write("-ERR EXEC without MULTI\r\n"); err != nil {
-			return fmt.Errorf("Write failed: %v", err)
-		}
-	} else {
-		if len(s.queue) == 0 {
-			if s.queuing != false {
-				s.queuing = false
-			}
-
-			if err := s.c.Write("*0\r\n"); err != nil {
-				return fmt.Errorf("Write failed: %v", err)
-			}
-		} else {
-			s.queuing = false
-
-			for _, request := range s.queue {
-				s.HandleRequest(request)
-			}
-		}
-	}
-
-	return nil
+	return ":1\r\n", nil
 }

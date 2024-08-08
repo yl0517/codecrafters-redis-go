@@ -1,3 +1,5 @@
 {
-    "go.toolsEnvVars": {}
+    "go.toolsEnvVars": {
+        "GOTOOLCHAIN": "auto"
+    }
 }

@@ -32,7 +32,7 @@ func NewFile(f *os.File) *File {
 }
 
 // processRDB handles the KEYS command
-func processRDB(s *Server) error {
+func (s *Server) processRDB() error {
 	path := fmt.Sprintf("%s/%s", s.opts.Dir, s.opts.Dbfilename)
 	f, err := os.Open(path)
 	if err != nil {
