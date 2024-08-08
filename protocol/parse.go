@@ -52,16 +52,6 @@ func ToRespArray(arr []string) string {
 	return respArr
 }
 
-// ToExecRespArray returns a RESP Array just for the EXEC command
-func ToExecRespArray(arr []string) string {
-	respArr := fmt.Sprintf("*%d\r\n", len(arr))
-	for _, s := range arr {
-		respArr += s
-	}
-
-	return respArr
-}
-
 // ToBulkString turns a regular string into a bulk string
 func ToBulkString(s string) string {
 	return fmt.Sprintf("$%d\r\n%s\r\n", len(s), s)
@@ -71,20 +61,3 @@ func ToBulkString(s string) string {
 func ToSimpleError(s string) string {
 	return fmt.Sprintf("-%s\r\n", s)
 }
-
-// ExtractString Extracts the string response from RESP data
-// func ExtractString(s string) (string, error) {
-// 	firstByte := s[0]
-
-// 	switch firstByte {
-// 	case '+', '-', ':':
-// 		return s[1 : len(s)-2], nil
-// 	case '$':
-// 		crlfIndex := strings.Index(s, "\r\n")
-
-// 		return s[crlfIndex+2 : len(s)-2], nil
-
-// 	default:
-// 		return "", fmt.Errorf("can't extract string: %s", s)
-// 	}
-// }

@@ -169,7 +169,12 @@ func handleExec(s *Server) error {
 				responses = append(responses, response)
 			}
 
-			s.c.Write(ToExecRespArray(responses))
+			respArr := fmt.Sprintf("*%d\r\n", len(responses))
+			for _, s := range responses {
+				respArr += s
+			}
+
+			s.c.Write(respArr)
 		}
 	}
 
