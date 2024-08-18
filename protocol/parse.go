@@ -46,7 +46,7 @@ func VerifyBulkStringLength(s string, length int) error {
 func ToRespArray(arr []string) string {
 	respArr := fmt.Sprintf("*%d\r\n", len(arr))
 	for _, s := range arr {
-		respArr += fmt.Sprintf("$%d\r\n%s\r\n", len(s), s)
+		respArr += ToBulkString(s)
 	}
 
 	return respArr
