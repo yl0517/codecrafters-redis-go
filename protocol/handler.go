@@ -741,7 +741,6 @@ func handleXrange(request []string, s *Server) (string, error) {
 }
 
 func handleXread(timeout int, request []string, s *Server) (string, error) {
-	streams := s.storage.streams
 	curr := make([]*StreamEntry, len(s.storage.streams[request[0]].entries))
 	copy(curr, s.storage.streams[request[0]].entries)
 
@@ -772,11 +771,17 @@ func handleXread(timeout int, request []string, s *Server) (string, error) {
 		streamKey := request[i]
 		streamID := request[(len(request))/2+i]
 
+		stream, ok := s.storage.GetStream(streamKey)
+		if !ok {
+			continue
+		}
+		entries := stream.entries
+
 		if streamID == "$" {
-			if len(curr) == len(streams[streamKey].entries) {
+			if len(curr) == len(entries) {
 				return "$-1\r\n", nil
 			}
-			streamID = streams[streamKey].entries[len(streams[streamKey].entries)-1-(len(streams[streamKey].entries)-len(curr))].id
+			streamID = entries[len(entries)-1-(len(entries)-len(curr))].id
 		}
 
 		reqMilli, reqSeq, err := getTimeAndSeq(streamID)
@@ -784,13 +789,8 @@ func handleXread(timeout int, request []string, s *Server) (string, error) {
 			return "", fmt.Errorf("getTimeAndSeq failed: %v", err)
 		}
 
-		stream, exists := streams[streamKey]
-		if !exists {
-			continue
-		}
-
 		startIdx := -1
-		for j, entry := range stream.entries {
+		for j, entry := range entries {
 			milli, seq, err := getTimeAndSeq(entry.id)
 			if err != nil {
 				return "", fmt.Errorf("getTimeAndSeq failed: %v", err)
@@ -806,7 +806,7 @@ func handleXread(timeout int, request []string, s *Server) (string, error) {
 			continue
 		}
 
-		entries := stream.entries[startIdx:]
+		entries = entries[startIdx:]
 		if len(entries) == 0 {
 			continue
 		}
