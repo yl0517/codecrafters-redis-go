@@ -4,14 +4,14 @@ var storage = NewStorage()
 
 // Entry represents the cache entry.
 type Entry struct {
-	msg      string
+	value    string
 	expireAt int64
 }
 
 // NewEntry is the Entry constructor.
 func NewEntry(s string, t int64) *Entry {
 	return &Entry{
-		msg:      s,
+		value:    s,
 		expireAt: t,
 	}
 }
@@ -28,4 +28,28 @@ func NewStorage() *Storage {
 		cache:   make(map[string]*Entry),
 		streams: make(map[string]*Stream),
 	}
+}
+
+func (s *Storage) Get(key string) (*Entry, bool) {
+	entry, ok := s.cache[key]
+
+	return entry, ok
+}
+
+func (s *Storage) Set(key string, value string, expireAt int64) {
+	s.cache[key] = NewEntry(value, int64(expireAt))
+}
+
+func (s *Storage) Delete(key string) {
+	delete(s.cache, key)
+}
+
+func (s *Storage) GetStream(key string) (*Stream, bool) {
+	stream, ok := s.streams[key]
+
+	return stream, ok
+}
+
+func (s *Storage) AddStream(key string) {
+	s.streams[key] = NewStream()
 }

@@ -357,7 +357,7 @@ func handleSet(s *Server, request []string) (string, error) {
 		expireAt = time.Now().UnixMilli() + expireAfter
 	}
 
-	s.storage.cache[key] = NewEntry(value, expireAt)
+	s.storage.Set(key, value, expireAt)
 
 	if s.opts.Role == "master" {
 		return "+OK\r\n", nil
@@ -369,17 +369,17 @@ func handleSet(s *Server, request []string) (string, error) {
 func handleGet(s *Server, key string) (string, error) {
 	now := time.Now().UnixMilli()
 
-	entry, ok := s.storage.cache[key]
+	entry, ok := s.storage.Get(key)
 	if !ok {
 		return "$-1\r\n", nil
 	}
 
 	if entry.expireAt != 0 && now > entry.expireAt {
-		delete(s.storage.cache, key)
+		s.storage.Delete(key)
 		return "$-1\r\n", nil
 	}
 
-	return fmt.Sprintf("$%d\r\n%s\r\n", len(entry.msg), entry.msg), nil
+	return fmt.Sprintf("$%d\r\n%s\r\n", len(entry.value), entry.value), nil
 }
 
 func handleInfo(arg string, s *Server) (string, error) {
@@ -538,13 +538,12 @@ func handleType(request []string, s *Server) (string, error) {
 
 	fmt.Println(request[0])
 
-	_, ok := s.storage.streams[request[0]]
+	_, ok := s.storage.GetStream(request[0])
 	if ok {
 		return "+stream\r\n", nil
-
 	}
 
-	_, ok = s.storage.cache[request[0]]
+	_, ok = s.storage.Get(request[0])
 	if ok {
 		return "+string\r\n", nil
 	}
@@ -553,11 +552,11 @@ func handleType(request []string, s *Server) (string, error) {
 }
 
 func handleXadd(request []string, s *Server) (string, error) {
-	_, ok := s.storage.streams[request[0]]
+	stream, ok := s.storage.GetStream(request[0])
 	if !ok {
-		s.storage.streams[request[0]] = NewStream()
+		s.storage.AddStream(request[0])
+		stream, _ = s.storage.GetStream(request[0])
 	}
-	stream := s.storage.streams[request[0]]
 
 	id := request[1]
 	if strings.Contains(id, "*") {
@@ -616,7 +615,12 @@ func handleXrange(request []string, s *Server) (string, error) {
 	var endIdx int
 	foundEnd := false
 
-	stream := s.storage.streams[key].entries
+	stream, ok := s.storage.GetStream(key)
+	if !ok {
+		return "", fmt.Errorf("Stream with key doesn't exist: %v", stream)
+	}
+
+	streamEntries := stream.entries
 
 	startMilli, startSeq := 0, 0
 
@@ -644,7 +648,7 @@ func handleXrange(request []string, s *Server) (string, error) {
 	endSeq := 0
 
 	if request[2] == "+" {
-		endIdx = len(stream)
+		endIdx = len(streamEntries)
 		foundEnd = true
 	} else if strings.Contains(request[2], "-") {
 		milli, seq, err := getTimeAndSeq(request[2])
@@ -666,7 +670,7 @@ func handleXrange(request []string, s *Server) (string, error) {
 
 	if !foundStart || !foundEnd {
 		if endSeq < 0 {
-			for i, entry := range stream {
+			for i, entry := range streamEntries {
 				milli, seq, err := getTimeAndSeq(entry.id)
 				if err != nil {
 					return "", fmt.Errorf("getTimeSeq failed: %v", err)
@@ -692,7 +696,7 @@ func handleXrange(request []string, s *Server) (string, error) {
 				}
 			}
 		} else {
-			for i, entry := range stream {
+			for i, entry := range streamEntries {
 				milli, seq, err := getTimeAndSeq(entry.id)
 				if err != nil {
 					return "", fmt.Errorf("getTimeSeq failed: %v", err)
@@ -720,7 +724,7 @@ func handleXrange(request []string, s *Server) (string, error) {
 		}
 	}
 
-	entries := stream[startIdx:endIdx]
+	entries := streamEntries[startIdx:endIdx]
 
 	resp := fmt.Sprintf("*%d\r\n", len(entries))
 	for _, entry := range entries {
@@ -836,18 +840,18 @@ func handleXread(timeout int, request []string, s *Server) (string, error) {
 }
 
 func handleIncr(key string, s *Server) (string, error) {
-	if entry, ok := s.storage.cache[key]; ok {
-		val, err := strconv.Atoi(entry.msg)
+	if entry, ok := s.storage.Get(key); ok {
+		val, err := strconv.Atoi(entry.value)
 		if err != nil {
 			return "-ERR value is not an integer or out of range\r\n", nil
 		}
 
 		incremented := strconv.Itoa(val + 1)
 
-		entry.msg = incremented
+		entry.value = incremented
 		return fmt.Sprintf(":%s\r\n", incremented), nil
 	}
-	s.storage.cache[key] = NewEntry("1", 0)
+	s.storage.Set(key, "1", 0)
 
 	return ":1\r\n", nil
 }

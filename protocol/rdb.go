@@ -162,7 +162,7 @@ func (s *Server) addKVPair(file *File) error {
 
 			fmt.Printf("Parsed value: %s\n", value)
 			fmt.Printf("Adding kv pair with expiry: %s, %s, %d\n", key, value, expiry)
-			s.storage.cache[key] = NewEntry(value, expiry)
+			s.storage.Set(key, value, expiry)
 			expiry = 0
 		}
 	}
