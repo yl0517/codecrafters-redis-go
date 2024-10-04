@@ -367,19 +367,12 @@ func handleSet(s *Server, request []string) (string, error) {
 }
 
 func handleGet(s *Server, key string) (string, error) {
-	now := time.Now().UnixMilli()
-
-	entry, ok := s.storage.Get(key)
-	if !ok {
+	value := s.storage.Get(key)
+	if value == nil {
 		return "$-1\r\n", nil
 	}
 
-	if entry.expireAt != 0 && now > entry.expireAt {
-		s.storage.Delete(key)
-		return "$-1\r\n", nil
-	}
-
-	return fmt.Sprintf("$%d\r\n%s\r\n", len(entry.value), entry.value), nil
+	return fmt.Sprintf("$%d\r\n%s\r\n", len(*value), *value), nil
 }
 
 func handleInfo(arg string, s *Server) (string, error) {
@@ -543,8 +536,8 @@ func handleType(request []string, s *Server) (string, error) {
 		return "+stream\r\n", nil
 	}
 
-	_, ok = s.storage.Get(request[0])
-	if ok {
+	value := s.storage.Get(request[0])
+	if value != nil {
 		return "+string\r\n", nil
 	}
 
@@ -620,7 +613,7 @@ func handleXrange(request []string, s *Server) (string, error) {
 		return "", fmt.Errorf("Stream with key doesn't exist: %v", stream)
 	}
 
-	streamEntries := stream.entries
+	entries := stream.entries
 
 	startMilli, startSeq := 0, 0
 
@@ -648,7 +641,7 @@ func handleXrange(request []string, s *Server) (string, error) {
 	endSeq := 0
 
 	if request[2] == "+" {
-		endIdx = len(streamEntries)
+		endIdx = len(entries)
 		foundEnd = true
 	} else if strings.Contains(request[2], "-") {
 		milli, seq, err := getTimeAndSeq(request[2])
@@ -670,7 +663,7 @@ func handleXrange(request []string, s *Server) (string, error) {
 
 	if !foundStart || !foundEnd {
 		if endSeq < 0 {
-			for i, entry := range streamEntries {
+			for i, entry := range entries {
 				milli, seq, err := getTimeAndSeq(entry.id)
 				if err != nil {
 					return "", fmt.Errorf("getTimeSeq failed: %v", err)
@@ -696,7 +689,7 @@ func handleXrange(request []string, s *Server) (string, error) {
 				}
 			}
 		} else {
-			for i, entry := range streamEntries {
+			for i, entry := range entries {
 				milli, seq, err := getTimeAndSeq(entry.id)
 				if err != nil {
 					return "", fmt.Errorf("getTimeSeq failed: %v", err)
@@ -724,7 +717,7 @@ func handleXrange(request []string, s *Server) (string, error) {
 		}
 	}
 
-	entries := streamEntries[startIdx:endIdx]
+	entries = entries[startIdx:endIdx]
 
 	resp := fmt.Sprintf("*%d\r\n", len(entries))
 	for _, entry := range entries {
@@ -840,15 +833,16 @@ func handleXread(timeout int, request []string, s *Server) (string, error) {
 }
 
 func handleIncr(key string, s *Server) (string, error) {
-	if entry, ok := s.storage.Get(key); ok {
-		val, err := strconv.Atoi(entry.value)
+	if value := s.storage.Get(key); value != nil {
+		val, err := strconv.Atoi(*value)
 		if err != nil {
 			return "-ERR value is not an integer or out of range\r\n", nil
 		}
 
 		incremented := strconv.Itoa(val + 1)
 
-		entry.value = incremented
+		*value = incremented
+
 		return fmt.Sprintf(":%s\r\n", incremented), nil
 	}
 	s.storage.Set(key, "1", 0)

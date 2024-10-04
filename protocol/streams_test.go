@@ -232,11 +232,13 @@ func Test_getTimeAndSeq(t *testing.T) {
 			wantErr:   false,
 		},
 		{
-			name: "Test getTimeAndSeq 1",
+			name: "Test getTimeAndSeq 2",
 			args: args{
 				id: "a-b",
 			},
-			wantErr: true,
+			wantMilli: -1,
+			wantSeq:   -1,
+			wantErr:   true,
 		},
 	}
 	for _, tt := range tests {
